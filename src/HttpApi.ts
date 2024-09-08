@@ -3,6 +3,7 @@ import {
   HttpApiBuilder,
   HttpApiEndpoint,
   HttpApiGroup,
+  HttpApiSchema,
   HttpApiSecurity,
   HttpApiSwagger,
   HttpMiddleware,
@@ -10,24 +11,24 @@ import {
   OpenApi
 } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Schema } from "@effect/schema"
-import { DateTime, Effect, Layer } from "effect"
+import { ParseResult, Schema } from "@effect/schema"
+import { ParseError } from "@effect/schema/ParseResult"
+import { DateTime, Effect, Layer, Option, pipe } from "effect"
 import { createServer } from "node:http"
+import { User, UserId, UserRepository, UserRepositoryLive } from "./Model.js"
 
 // --------------------------------------------
 // Implementation
 // --------------------------------------------
 
-// Our domain "User" Schema
-class User extends Schema.Class<User>("User")({
-  id: Schema.Number,
-  name: Schema.String,
-  createdAt: Schema.DateTimeUtc
-}) {}
-
 // define the error schemas
 export class UserNotFound extends Schema.TaggedError<UserNotFound>()(
   "UserNotFound",
+  {}
+) {}
+
+export class BadRequest extends Schema.TaggedError<BadRequest>()(
+  "BadRequest",
   {}
 ) {}
 
@@ -41,39 +42,39 @@ class UsersApi extends HttpApiGroup.make("users").pipe(
     HttpApiEndpoint.get("findById", "/users/:id").pipe(
       HttpApiEndpoint.setPath(
         Schema.Struct({
-          id: Schema.NumberFromString
+          id: UserId
         })
       ),
       HttpApiEndpoint.setSuccess(User),
       HttpApiEndpoint.addError(UserNotFound, { status: 404 })
     )
   ),
-  // HttpApiGroup.add(
-  //   HttpApiEndpoint.post("create", "/users").pipe(
-  //     HttpApiEndpoint.setSuccess(User),
-  //     // and here is a Schema for the request payload / body
-  //     //
-  //     // this is a POST request, so the payload is in the body
-  //     // but for a GET request, the payload would be in the URL search params
-  //     HttpApiEndpoint.setPayload(
-  //       Schema.Struct({
-  //         name: Schema.String
-  //       })
-  //     )
-  //   )
-  // ),
-  // // by default, the endpoint will respond with a 204 No Content
-  // HttpApiGroup.add(HttpApiEndpoint.del("delete", "/users/:id")),
-  // HttpApiGroup.add(
-  //   HttpApiEndpoint.patch("update", "/users/:id").pipe(
-  //     HttpApiEndpoint.setSuccess(User),
-  //     HttpApiEndpoint.setPayload(
-  //       Schema.Struct({
-  //         name: Schema.String
-  //       })
-  //     )
-  //   )
-  // ),
+  HttpApiGroup.add(
+    HttpApiEndpoint.post("create", "/users").pipe(
+      HttpApiEndpoint.setSuccess(User),
+      // and here is a Schema for the request payload / body
+      //
+      // this is a POST request, so the payload is in the body
+      // but for a GET request, the payload would be in the URL search params
+      HttpApiEndpoint.setPayload(
+        Schema.Struct({
+          name: Schema.String
+        })
+      )
+    )
+  ),
+  // by default, the endpoint will respond with a 204 No Content
+  HttpApiGroup.add(HttpApiEndpoint.del("delete", "/users/:id")),
+  HttpApiGroup.add(
+    HttpApiEndpoint.patch("update", "/users/:id").pipe(
+      HttpApiEndpoint.setSuccess(User),
+      HttpApiEndpoint.setPayload(
+        Schema.Struct({
+          name: Schema.String
+        })
+      )
+    )
+  ),
   // HttpApiGroup.add(
   //   HttpApiEndpoint.post("upload", "/users/upload").pipe(
   //     HttpApiEndpoint.setPayload(
@@ -100,6 +101,7 @@ class UsersApi extends HttpApiGroup.make("users").pipe(
   // ),
   // // or we could add an error to the group
   HttpApiGroup.addError(Unauthorized, { status: 401 }),
+  HttpApiGroup.addError(ParseError, { status: 400 }),
   // add an OpenApi title & description
   OpenApi.annotate({
     title: "Users API",
@@ -116,26 +118,49 @@ class MyApi extends HttpApi.empty.pipe(
 ) {}
 
 // the `HttpApiBuilder.group` api returns a `Layer`
-const UsersApiLive: Layer.Layer<HttpApiGroup.HttpApiGroup.Service<"users">> = HttpApiBuilder.group(
-  MyApi,
-  "users",
-  (handlers) =>
-    handlers.pipe(
-      // the parameters & payload are passed to the handler function.
-      HttpApiBuilder.handle("findById", ({ path: { id } }) =>
-        Effect.succeed(
-          new User({
-            id,
-            name: "John Doe",
-            createdAt: DateTime.unsafeNow()
-          })
-        ))
-    )
-)
+const UsersApiLive: Layer.Layer<HttpApiGroup.HttpApiGroup.Service<"users">> = HttpApiBuilder
+  .group(
+    MyApi,
+    "users",
+    (handlers) =>
+      Effect.gen(function*() {
+        const repository = yield* UserRepository
+        return handlers.pipe(
+          HttpApiBuilder.handle("create", ({ payload }) =>
+            Effect.flatMap(
+              Schema.decode(User.insert)({
+                name: payload.name,
+                createdAt: pipe(DateTime.unsafeNow(), DateTime.toDate),
+                updatedAt: pipe(DateTime.unsafeNow(), DateTime.toDate)
+              }),
+              repository.insert
+            )),
+          HttpApiBuilder.handle("findById", ({ path: { id } }) =>
+            Effect.map(
+              repository.findById(id),
+              Option.getOrThrowWith(() => new UserNotFound())
+            )),
+          HttpApiBuilder.handle("update", ({ path: { id }, payload }) =>
+            Effect.flatMap(
+              Schema.decode(User.update)({
+                id,
+                ...payload,
+                updatedAt: pipe(DateTime.unsafeNow(), DateTime.toDate)
+              }),
+              repository.update
+            )),
+          HttpApiBuilder.handle("delete", ({ path: { id } }) => repository.delete(id))
+        )
+      })
+  ).pipe(
+    Layer.provide(UserRepositoryLive)
+  )
 
 const MyApiLive: Layer.Layer<HttpApi.HttpApi.Service> = HttpApiBuilder.api(
   MyApi
-).pipe(Layer.provide(UsersApiLive))
+).pipe(
+  Layer.provide(UsersApiLive)
+)
 
 // use the `HttpApiBuilder.serve` function to register our API with the HTTP
 // server
