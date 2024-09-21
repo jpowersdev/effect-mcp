@@ -10,3 +10,6 @@ scratchpad/
 .direnv/
 .idea/
 .env
+
+/data/*
+!/data/.gitkeep
