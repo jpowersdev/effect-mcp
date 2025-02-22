@@ -1,8 +1,7 @@
 import { HttpApiSchema } from "@effect/platform"
-import { Schema } from "@effect/schema"
 import { Model } from "@effect/sql"
+import { Equal, Hash, Schema } from "effect"
 import type { Equivalence } from "effect"
-import { Equal, Hash } from "effect"
 
 export const UserId = Schema.Number.pipe(Schema.brand("UserId"))
 export type UserId = typeof UserId.Type

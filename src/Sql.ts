@@ -1,12 +1,11 @@
-import { SqliteClient, SqliteMigrator } from "@effect/sql-sqlite-node"
-import { Config, identity, Layer } from "effect"
-
 import { NodeContext } from "@effect/platform-node"
 import { SqlClient } from "@effect/sql"
+import { SqliteClient, SqliteMigrator } from "@effect/sql-sqlite-node"
+import { Config, identity, Layer } from "effect"
 import { fileURLToPath } from "url"
 import { makeTestLayer } from "./lib/Layer.js"
 
-const ClientLive = SqliteClient.layer({
+const ClientLive = SqliteClient.layerConfig({
   filename: Config.succeed("data/db.sqlite")
 })
 

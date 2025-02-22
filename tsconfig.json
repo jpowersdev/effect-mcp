@@ -1,15 +1,12 @@
 {
-    "compilerOptions": {
-        "composite": true,
-        "incremental": true
+  "extends": "./tsconfig.base.json",
+  "include": [],
+  "references": [
+    {
+      "path": "tsconfig.src.json"
     },
-    "files": [],
-    "references": [
-        {
-            "path": "./tsconfig.src.json"
-        },
-        {
-            "path": "./tsconfig.test.json"
-        }
-    ]
+    {
+      "path": "tsconfig.test.json"
+    }
+  ]
 }

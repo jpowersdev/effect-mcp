@@ -1,9 +1,10 @@
-import { HttpApi } from "@effect/platform"
-import { BadRequest, Unauthorized } from "./Api/Errors.js"
-import { UsersApi } from "./Users/Api.js"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
+import { Schema } from "effect"
 
-export const Api = HttpApi.empty.pipe(
-  HttpApi.addGroup(UsersApi),
-  HttpApi.addError(Unauthorized),
-  HttpApi.addError(BadRequest)
+const GreetingsApi = HttpApiGroup.make("Greetings").add(
+  HttpApiEndpoint.get("hello-world")`/`.addSuccess(Schema.String)
 )
+
+// Define our API with one group named "Greetings" and one endpoint called "hello-world"
+export const Api = HttpApi.make("MyApi")
+  .add(GreetingsApi)

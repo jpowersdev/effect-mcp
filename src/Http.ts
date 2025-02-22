@@ -1,23 +1,27 @@
-import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from "@effect/platform"
+import { HttpApiBuilder, HttpApiSwagger, HttpServer } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Config, Layer, pipe } from "effect"
+import { Effect, Layer } from "effect"
 import { createServer } from "http"
 import { Api } from "./Api.js"
-import { HttpUsersLive } from "./Users/Http.js"
 
+// Implement the "Greetings" group
+const GreetingsLive = HttpApiBuilder.group(
+  Api,
+  "Greetings",
+  (handlers) =>
+    handlers
+      .handle("hello-world", () => Effect.succeed("Hello, World!"))
+)
+
+// Provide the implementation for the API
 const ApiLive = HttpApiBuilder.api(Api).pipe(
-  Layer.provide(HttpUsersLive)
+  Layer.provide(GreetingsLive)
 )
 
-const ServerLive = pipe(
-  Config.number("PORT"),
-  Config.map((port) => NodeHttpServer.layer(createServer, { port })),
-  Layer.unwrapEffect
-)
+const ServerLive = NodeHttpServer.layer(createServer, { port: 3000 })
 
-// use the `HttpApiBuilder.serve` function to register our API with the HTTP
-// server
-export const HttpLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
+// Set up the server using NodeHttpServer on port 3000
+export const HttpLive = HttpApiBuilder.serve().pipe(
   // Provide the swagger documentation
   Layer.provide(
     HttpApiSwagger.layer({

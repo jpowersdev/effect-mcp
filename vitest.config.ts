@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config"
 
 export default defineConfig({
   test: {
-    setupFiles: [Path.join(__dirname, "setupTests.ts")],
+    setupFiles: [Path.join(__dirname, "test/vitest.setup.ts")],
     fakeTimers: {
       toFake: undefined
     },
