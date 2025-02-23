@@ -68,7 +68,11 @@ export class Mailbox extends Effect.Service<Mailbox>()("@jpowersdev/effect-mcp/M
     const offer = (message: JsonRpcRequest) =>
       inbox.offer(message).pipe(
         Effect.withSpan("Mailbox.offer", {
-          attributes: { message }
+          attributes: {
+            "rpc.method": message.method,
+            "rpc.id": message.id,
+            "rpc.params": Option.getOrUndefined(message.params)
+          }
         })
       )
 
