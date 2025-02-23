@@ -1,10 +1,29 @@
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "@effect/platform"
 import { Schema } from "effect"
+import { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
 
-const GreetingsApi = HttpApiGroup.make("Greetings").add(
-  HttpApiEndpoint.get("hello-world")`/`.addSuccess(Schema.String)
-)
+export class McpApi extends HttpApiGroup.make("mcp")
+  .add(
+    HttpApiEndpoint.get("index")`/`
+      .addSuccess(Schema.String, { status: 200 })
+      .annotate(OpenApi.Title, "Index")
+  )
+  .add(
+    HttpApiEndpoint.post("send-message")`/messages`
+      .setPayload(JsonRpcRequest)
+      .addSuccess(Schema.Boolean, { status: 200 })
+      .annotate(OpenApi.Title, "Create a Message")
+      .annotate(OpenApi.Description, "Create a new message")
+  )
+  .add(
+    HttpApiEndpoint.get("message-stream")`/messages`
+      .addSuccess(JsonRpcResponse, { status: 200 })
+      .annotate(OpenApi.Title, "Message Stream by way of Server-Sent Events")
+      .annotate(OpenApi.Description, "Stream of messages")
+  )
+  .annotate(OpenApi.Title, "Model Context Protocol")
+{}
 
-// Define our API with one group named "Greetings" and one endpoint called "hello-world"
-export const Api = HttpApi.make("MyApi")
-  .add(GreetingsApi)
+export class Api extends HttpApi.make("Api")
+  .add(McpApi)
+{}

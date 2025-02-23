@@ -1,27 +1,54 @@
-import { HttpApiBuilder, HttpApiSwagger, HttpServer } from "@effect/platform"
+import {
+  Headers,
+  HttpApiBuilder,
+  HttpApiSwagger,
+  HttpMiddleware,
+  HttpServer,
+  HttpServerResponse
+} from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { createServer } from "http"
 import { Api } from "./Api.js"
+import { Mailbox } from "./Mailbox.js"
 
-// Implement the "Greetings" group
-const GreetingsLive = HttpApiBuilder.group(
+export const HttpMcpLive = HttpApiBuilder.group(
   Api,
-  "Greetings",
+  "mcp",
   (handlers) =>
-    handlers
-      .handle("hello-world", () => Effect.succeed("Hello, World!"))
+    Effect.gen(function*() {
+      const mailbox = yield* Mailbox
+
+      return handlers
+        .handleRaw("index", () =>
+          HttpServerResponse.file("public/index.html").pipe(
+            Effect.orDie
+          ))
+        .handle("send-message", ({ payload }) => mailbox.offer(payload))
+        .handleRaw("message-stream", () =>
+          HttpServerResponse.stream(mailbox.messages, {
+            headers: Headers.fromInput({
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive"
+            })
+          }))
+    })
+).pipe(
+  Layer.provide([
+    Mailbox.Default
+  ])
 )
 
 // Provide the implementation for the API
 const ApiLive = HttpApiBuilder.api(Api).pipe(
-  Layer.provide(GreetingsLive)
+  Layer.provide(HttpMcpLive)
 )
 
 const ServerLive = NodeHttpServer.layer(createServer, { port: 3000 })
 
 // Set up the server using NodeHttpServer on port 3000
-export const HttpLive = HttpApiBuilder.serve().pipe(
+export const HttpLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   // Provide the swagger documentation
   Layer.provide(
     HttpApiSwagger.layer({
