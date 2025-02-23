@@ -6,10 +6,10 @@
     <meta http-equiv="X-UA-Compatible" content="ie=edge" />
     <meta name="htmx-config" content='{"withCredentials":true}' />
     <title>Model Context Protocol</title>
-    <script
+    <!-- <script
       defer
       src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
-    ></script>
+    ></script> -->
     <script
       src="https://unpkg.com/htmx.org@2.0.4"
       crossorigin="anonymous"
@@ -25,26 +25,77 @@
       integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
       crossorigin="anonymous"
     />
+    <style>
+      .grow-wrap {
+        /* easy way to plop the elements on top of each other and have them both sized based on the tallest one's height */
+        display: grid;
+      }
+      .grow-wrap::after {
+        /* Note the weird space! Needed to preventy jumpy behavior */
+        content: attr(data-replicated-value) " ";
+
+        /* This is how textarea text behaves */
+        white-space: pre-wrap;
+
+        /* Hidden from view, clicks, and screen readers */
+        visibility: hidden;
+      }
+      .grow-wrap > textarea {
+        /* You could leave this, but after a user resizes, then it ruins the auto sizing */
+        resize: none;
+
+        /* Firefox shows scrollbar on growth, you can hide like this. */
+        overflow: hidden;
+      }
+      .grow-wrap > textarea,
+      .grow-wrap::after {
+        /* Identical styling required!! */
+        border: 1px solid black;
+        padding: 0.5rem;
+        font: inherit;
+
+        /* Place on top of each other */
+        grid-area: 1 / 1 / 2 / 2;
+      }
+
+      body {
+        margin: 2rem;
+        font:
+          1rem/1.4 system-ui,
+          sans-serif;
+      }
+
+      label {
+        display: block;
+      }
+    </style>
   </head>
   <body>
     <div x-data="messages" class="container my-3">
       <form x-ref="request" @submit.prevent="send(method, params)">
         <div class="mb-3">
-          <label class="form-label" for="method">Method</label>
-          <input
-            class="form-control"
-            name="method"
-            x-model="method"
-            type="text"
-          />
+          <label class="form-label" for="messageType">Message Type</label>
+          <select class="form-select" name="messageType" x-model="method">
+            <template x-for="messageType in Object.keys(messageTypes)">
+              <option
+                :value="messageType"
+                x-text="messageType"
+                x-bind:selected="method === messageType"
+              ></option>
+            </template>
+          </select>
         </div>
         <div class="mb-3">
           <label class="form-label" for="params">Params</label>
-          <textarea
-            class="form-control"
-            name="params"
-            x-model="params"
-          ></textarea>
+          <div class="grow-wrap">
+            <textarea
+              class="form-control"
+              name="params"
+              x-model="params"
+              x-ref="params"
+              onInput="this.parentNode.dataset.replicatedValue = this.value"
+            ></textarea>
+          </div>
         </div>
         <button class="btn btn-primary" type="submit">Send</button>
       </form>
@@ -52,45 +103,105 @@
         <ul class="list-group">
           <template x-for="message in list">
             <li class="list-group-item">
-              <pre
-                class="mb-0"
-              ><code x-text="JSON.stringify(message, null, 2)"></code></pre>
+              <pre class="mb-0"><code x-text="format(message)"></code></pre>
             </li>
           </template>
         </ul>
       </div>
     </div>
-    <script>
-      document.addEventListener("alpine:init", () => {
-        Alpine.data("messages", () => ({
-          list: [],
-          id: 0,
-          method: "initialize",
-          params: "{}",
-          send(method, params) {
-            void fetch("/messages", {
-              method: "POST",
-              body: JSON.stringify({
-                jsonrpc: "2.0",
-                id: `${this.id++}`,
-                method,
-                params: JSON.parse(params),
-              }),
-              headers: { "content-type": "application/json" },
-            });
+    <script type="module">
+      import { Inspectable } from "https://esm.sh/effect";
+      import { Alpine } from "https://esm.sh/alpinejs";
+
+      window.Alpine = Alpine;
+
+      Alpine.data("messages", () => ({
+        list: [],
+        id: 0,
+        messageTypes: {
+          initialize: {
+            method: "initialize",
+            params: {
+              protocolVersion: "2024-11-05",
+              capabilities: {
+                roots: {
+                  listChanged: true,
+                },
+                sampling: {},
+              },
+              clientInfo: {
+                name: "Model Context Protocol - Client",
+                version: "1.0.0",
+              },
+            },
           },
-          init() {
-            const eventSource = new EventSource("/messages");
-            eventSource.onmessage = (event) => {
+          "tools/list": {
+            method: "tools/list",
+            params: "{}",
+          },
+          "tools/call": {
+            method: "tools/call",
+            params: {
+              name: "GetName",
+              arguments: {},
+            },
+          },
+        },
+        method: "",
+        params: "",
+        endpoint: "",
+        send(method, params) {
+          void fetch(this.endpoint, {
+            method: "POST",
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: `${this.id++}`,
+              method,
+              params: JSON.parse(params),
+            }),
+            headers: { "content-type": "application/json" },
+          });
+        },
+        format(message) {
+          return Inspectable.format(message);
+        },
+        init() {
+          const sse = new EventSource("/messages");
+          sse.addEventListener("endpoint", (event) => {
+            this.endpoint = event.data;
+          });
+          sse.addEventListener("message", (event) => {
+            const data = JSON.parse(event.data);
+            if (data.method === "ping") {
+              return console.debug("ping");
+            }
+            console.debug("data", data);
+            this.list.push(data);
+          });
+          sse.addEventListener("error", (event) => {
+            try {
               const data = JSON.parse(event.data);
-              if (data.method !== "ping") {
-                console.debug("data", data);
-                this.list.push(data);
-              }
-            };
-          },
-        }));
-      });
+              console.error(data);
+            } catch {
+              setTimeout(() => {
+                window.location.reload();
+              }, 3000);
+            }
+          });
+          this.$watch("method", () => {
+            this.params = Inspectable.format(
+              this.messageTypes[this.method].params
+            );
+          });
+          this.$watch("params", () => {
+            this.$refs.params.parentElement.dataset.replicatedValue =
+              this.params;
+          });
+          this.method = "initialize";
+        },
+      }));
+
+      Alpine.start();
     </script>
     <script
       src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"

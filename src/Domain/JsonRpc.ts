@@ -11,20 +11,20 @@ export const JsonRpcMessage = Schema.Struct({
 
 export class JsonRpcRequest extends Schema.Class<JsonRpcRequest>("JsonRpcRequest")({
   ...JsonRpcMessage.fields,
-  id: Schema.Union(Schema.String, Schema.Number),
+  id: Schema.optionalWith(Schema.Union(Schema.String, Schema.Number), { as: "Option" }),
   method: Schema.String,
-  params: Schema.optionalWith(Schema.Unknown, { as: "Option" })
+  params: Schema.optionalWith(Schema.Any, { as: "Option" })
 }) {}
 
 export class JsonRpcSuccess extends Schema.Class<JsonRpcSuccess>("JsonRpcSuccess")({
   ...JsonRpcMessage.fields,
-  id: Schema.Union(Schema.String, Schema.Number),
+  id: Schema.optionalWith(Schema.Union(Schema.String, Schema.Number), { as: "Option" }),
   result: Schema.Unknown
 }) {}
 
 export class JsonRpcFailure extends Schema.Class<JsonRpcFailure>("JsonRpcFailure")({
   ...JsonRpcMessage.fields,
-  id: Schema.Union(Schema.String, Schema.Number),
+  id: Schema.optionalWith(Schema.Union(Schema.String, Schema.Number), { as: "Option" }),
   error: Schema.Unknown
 }) {}
 

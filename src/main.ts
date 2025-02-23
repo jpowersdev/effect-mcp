@@ -9,3 +9,8 @@ HttpLive.pipe(
   Effect.tapErrorCause((_) => Effect.logError(_)),
   NodeRuntime.runMain
 )
+
+process.on("SIGINT", () => {
+  console.log("SIGINT")
+  process.exit(0)
+})

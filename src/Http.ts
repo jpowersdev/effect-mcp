@@ -7,10 +7,11 @@ import {
   HttpServerResponse
 } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { createServer } from "http"
 import { Api } from "./Api.js"
 import { Mailbox } from "./Mailbox.js"
+import { CurrentSession, Sessions } from "./Session.js"
 
 export const HttpMcpLive = HttpApiBuilder.group(
   Api,
@@ -18,15 +19,28 @@ export const HttpMcpLive = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const mailbox = yield* Mailbox
+      const sessions = yield* Sessions
 
       return handlers
         .handleRaw("index", () =>
           HttpServerResponse.file("public/index.html").pipe(
             Effect.orDie
           ))
-        .handle("send-message", ({ payload }) => mailbox.offer(payload))
+        .handle("send-message", ({ payload, urlParams }) =>
+          mailbox.offer(payload).pipe(
+            Effect.annotateLogs({
+              "session.id": urlParams.sessionId
+            }),
+            Effect.annotateSpans({
+              "session.id": urlParams.sessionId
+            }),
+            Effect.provideServiceEffect(
+              CurrentSession,
+              sessions.findById(urlParams.sessionId)
+            )
+          ))
         .handleRaw("message-stream", () =>
-          HttpServerResponse.stream(mailbox.messages, {
+          HttpServerResponse.stream(Stream.encodeText(sessions.begin), {
             headers: Headers.fromInput({
               "Content-Type": "text/event-stream",
               "Cache-Control": "no-cache",
@@ -36,7 +50,8 @@ export const HttpMcpLive = HttpApiBuilder.group(
     })
 ).pipe(
   Layer.provide([
-    Mailbox.Default
+    Mailbox.Default,
+    Sessions.Default
   ])
 )
 
