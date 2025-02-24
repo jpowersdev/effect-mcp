@@ -1,6 +1,6 @@
 import { Effect, Match, Option } from "effect"
 import { Tool, ToolError } from "./Domain/Tool.js"
-import type { TextContent } from "./Generated.js"
+import { CallToolResult, TextContent } from "./Generated.js"
 
 // Request/Response types
 export interface ToolCallRequest {
@@ -77,17 +77,20 @@ export class ToolRegistry extends Effect.Service<ToolRegistry>()("ToolRegistry",
         )
 
         const content = yield* result.pipe(
-          Effect.map((text) => ({
-            type: "text" as const,
-            text,
-            annotations: Option.none()
-          }))
+          Effect.map((text) =>
+            TextContent.make({
+              type: "text" as const,
+              text,
+              annotations: Option.none()
+            })
+          )
         )
 
-        return {
+        return CallToolResult.make({
+          _meta: Option.none(),
           content: [content],
           isError: Option.none()
-        }
+        })
       }).pipe(
         Effect.withSpan("ToolRegistry.call", {
           attributes: { toolName: name }
