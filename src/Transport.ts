@@ -2,17 +2,21 @@ import { Effect, Match, Option, Schema } from "effect"
 import { CapabilityProvider } from "./CapabilityProvider.js"
 import type { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
 import { JsonRpcError, JsonRpcSuccess, ServerResult } from "./Domain/JsonRpc.js"
+import type { SessionId } from "./Domain/Session.js"
 import * as Model from "./Generated.js"
+import { SessionManager } from "./SessionManager.js"
 import { ToolRegistry } from "./ToolRegistry.js"
 
 export class Transport extends Effect.Service<Transport>()("Transport", {
   dependencies: [
     ToolRegistry.Default,
-    CapabilityProvider.Default
+    CapabilityProvider.Default,
+    SessionManager.Default
   ],
   scoped: Effect.gen(function*() {
     const tools = yield* ToolRegistry
     const capabilities = yield* CapabilityProvider
+    const sessions = yield* SessionManager
 
     const handleInitialize = Effect.all({
       _meta: Effect.succeedNone,
@@ -40,10 +44,14 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
         )
       )
 
-    const handle = (request: JsonRpcRequest): Effect.Effect<JsonRpcResponse> =>
+    const handle = (sessionId: SessionId, request: JsonRpcRequest): Effect.Effect<JsonRpcResponse> =>
       Effect.gen(function*() {
         const result = yield* Match.value(request.method).pipe(
           Match.when("initialize", () => handleInitialize),
+          Match.when("notifications/initialized", () =>
+            sessions.activateById(sessionId).pipe(
+              Effect.tap(() => Effect.log("activated session").pipe(Effect.annotateLogs({ sessionId })))
+            )),
           Match.when("tools/list", () => handleToolsList),
           Match.when("tools/call", () =>
             handleToolsCall(
@@ -85,7 +93,8 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
           attributes: {
             "mcp.method": request.method,
             "mcp.id": Option.getOrUndefined(request.id),
-            "mcp.params": Option.getOrUndefined(request.params)
+            "mcp.params": Option.getOrUndefined(request.params),
+            "mcp.session_id": sessionId
           }
         })
       )

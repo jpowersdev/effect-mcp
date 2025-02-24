@@ -1,6 +1,5 @@
-import { Deferred, Duration, Effect, Mailbox, Option, Queue, RcMap, Schedule, Schema, Stream } from "effect"
-import type { JsonRpcRequest } from "./Domain/JsonRpc.js"
-import { JsonRpcResponse } from "./Domain/JsonRpc.js"
+import { Duration, Effect, Mailbox, Option, Queue, RcMap, Schedule, Schema, Stream } from "effect"
+import { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
 import type { SessionId } from "./Domain/Session.js"
 import { SessionManager } from "./SessionManager.js"
 import { Transport } from "./Transport.js"
@@ -9,6 +8,11 @@ export interface Message {
   readonly sessionId: SessionId
   readonly payload: JsonRpcRequest
 }
+
+export class MessageBrokerError extends Schema.TaggedError<MessageBrokerError>()("MessageBrokerError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
+}) {}
 
 export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroker", {
   dependencies: [SessionManager.Default, Transport.Default],
@@ -27,22 +31,20 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
 
     // Start processing pipeline
     yield* Stream.fromQueue(queue).pipe(
-      Stream.tap(({ payload: message }) =>
-        Effect.log(`Processing ${message.method} (${Option.getOrUndefined(message.id)})`).pipe(
+      Stream.mapEffect(({ payload, sessionId }) =>
+        Effect.log(`Processing ${payload.method} (${Option.getOrUndefined(payload.id)})`).pipe(
           Effect.annotateLogs({
-            "mcp.method": message.method,
-            "mcp.id": Option.getOrUndefined(message.id),
-            "mcp.params": Option.getOrUndefined(message.params)
+            "mcp.method": payload.method,
+            "mcp.id": Option.getOrUndefined(payload.id),
+            "mcp.params": Option.getOrUndefined(payload.params)
           })
-        )
-      ),
-      Stream.mapEffect(({ payload: message, sessionId }) =>
-        transport.handle(message).pipe(
+        ).pipe(
+          Effect.andThen(() => transport.handle(sessionId, payload)),
           Effect.catchAllCause((cause) =>
             Effect.logError(cause).pipe(
               Effect.map(() => ({
                 jsonrpc: "2.0",
-                id: message.id,
+                id: payload.id,
                 error: {
                   code: -32000,
                   message: "Internal server error"
@@ -54,8 +56,16 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
             Effect.gen(function*() {
               const session = yield* sessions.findById(sessionId)
               const mailbox = yield* RcMap.get(mailboxes, session.id)
-              yield* mailbox.offer(response)
+              return yield* mailbox.offer(response)
             })
+          ),
+          Effect.whenEffect(
+            Effect.map(
+              sessions.findById(sessionId),
+              (session) =>
+                ["initialize", "notifications/initialized"].includes(payload.method) ||
+                session.activatedAt._tag === "Some"
+            )
           )
         )
       ),
@@ -78,40 +88,25 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
         const greeting = Stream.make(`event: endpoint\ndata: ${endpoint}\n\n`)
 
         // Create recurring ping stream every 30 seconds
-        const ping = Stream.repeatEffect(
-          Effect.succeed(`event:message\ndata:${
-            JSON.stringify({
+        const ping = Stream.fromSchedule(Schedule.spaced("30 seconds")).pipe(
+          Stream.map(() => {
+            const payload = JsonRpcRequest.make({
               jsonrpc: "2.0",
-              method: "ping"
+              method: "ping",
+              id: Option.none(),
+              params: Option.none()
             })
-          }\n\n`)
-        ).pipe(Stream.schedule(Schedule.spaced(Duration.seconds(30))))
 
-        const isActive = sessions.findById(sessionId).pipe(
-          Effect.option,
-          Effect.map(Option.match({
-            onSome: (session) => session.isActive,
-            onNone: () => false
-          }))
-        )
-
-        const latch = yield* Deferred.make<void>()
-
-        yield* isActive.pipe(
-          Effect.if({
-            onTrue: () => Deferred.succeed(latch, void 0),
-            onFalse: () => Effect.void
+            return `event: message\ndata: ${JSON.stringify(payload)}\n\n`
           }),
-          Effect.repeat({
-            schedule: Schedule.spaced(Duration.seconds(1)),
-            while: () => Effect.negate(Deferred.isDone(latch))
+          Stream.withSpan("MessageBroker.ping", {
+            attributes: { sessionId }
           })
         )
 
-        const messages = Stream.fromEffect(Deferred.await(latch)).pipe(
-          Stream.zipRight(Mailbox.toStream(mailbox)),
+        const messages = Mailbox.toStream(mailbox).pipe(
           Stream.mapEffect((response) => Schema.encodeUnknown(JsonRpcResponse)(response)),
-          Stream.map((response) => `data:${JSON.stringify(response)}\n\n`)
+          Stream.map((response) => `event:message\ndata:${JSON.stringify(response)}\n\n`)
         )
 
         return greeting.pipe(

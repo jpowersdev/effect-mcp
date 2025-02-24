@@ -32,7 +32,12 @@ export const HttpMcpLive = HttpApiBuilder.group(
             payload,
             sessionId: urlParams.sessionId
           }).pipe(
-            Effect.annotateLogs({ "session.id": urlParams.sessionId }),
+            Effect.tap(() => Effect.log("Received message")),
+            Effect.annotateLogs({
+              "mcp.method": payload.method,
+              "mcp.id": payload.id,
+              "session.id": urlParams.sessionId
+            }),
             Effect.annotateSpans({ "session.id": urlParams.sessionId }),
             Effect.provideServiceEffect(
               CurrentSession,

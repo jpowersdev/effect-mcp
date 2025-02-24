@@ -140,7 +140,7 @@
           },
           "tools/list": {
             method: "tools/list",
-            params: "{}",
+            params: {},
           },
           "tools/call": {
             method: "tools/call",
@@ -153,14 +153,33 @@
         method: "",
         params: "",
         endpoint: "",
-        send(method, params) {
+        serverInfo: {},
+        serverCapabilities: {},
+        initialization: {
+          status: "pending",
+          requestId: "init",
+        },
+        send(method, params, id) {
+          console.debug("sending", { method, params, id });
           void fetch(this.endpoint, {
             method: "POST",
             body: JSON.stringify({
               jsonrpc: "2.0",
-              id: `${this.id++}`,
+              id: id ? `${id}` : `${this.id++}`,
               method,
               params: JSON.parse(params),
+            }),
+            headers: { "content-type": "application/json" },
+          });
+        },
+        notify(method, params) {
+          console.debug("notifying", { method, params });
+          void fetch(this.endpoint, {
+            method: "POST",
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              method,
+              params,
             }),
             headers: { "content-type": "application/json" },
           });
@@ -178,7 +197,15 @@
             if (data.method === "ping") {
               return console.debug("ping");
             }
-            console.debug("data", data);
+            console.debug("received", data);
+            if (data.id === this.initialization.requestId) {
+              this.serverInfo = data.serverInfo;
+              this.serverCapabilities = data.capabilities;
+              this.notify("notifications/initialized");
+              this.initialization.status = "complete";
+              return;
+            }
+            if (!data.id) return;
             this.list.push(data);
           });
           sse.addEventListener("error", (event) => {
@@ -200,7 +227,18 @@
             this.$refs.params.parentElement.dataset.replicatedValue =
               this.params;
           });
-          this.method = "initialize";
+
+          this.$watch("endpoint", (value) => {
+            if (value) {
+              this.send(
+                "initialize",
+                JSON.stringify(this.messageTypes.initialize),
+                this.initialization.requestId
+              );
+            }
+          });
+
+          this.method = "tools/list";
         },
       }));
 

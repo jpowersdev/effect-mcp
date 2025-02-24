@@ -42,6 +42,11 @@ export class ToolRegistry extends Effect.Service<ToolRegistry>()("ToolRegistry",
       )
 
     const list = Effect.sync(() => Array.from(tools.values())).pipe(
+      Effect.tap((tools) =>
+        Effect.log("tools").pipe(
+          Effect.annotateLogs({ tools })
+        )
+      ),
       Effect.withSpan("ToolRegistry.list")
     )
 

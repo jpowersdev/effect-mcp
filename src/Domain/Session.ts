@@ -19,8 +19,7 @@ export interface Session {
   readonly createdAt: DateTime.DateTime
   readonly activatedAt: Option.Option<DateTime.DateTime>
 
-  readonly isActive: boolean
-
+  readonly isActive: () => boolean
   readonly activate: () => Session
 }
 
@@ -36,6 +35,7 @@ const Proto = {
     return Option.isSome(this.activatedAt)
   },
   activate(this: Session) {
+    console.log("activating session", this.id)
     return makeProto({
       ...this,
       activatedAt: Option.some(DateTime.unsafeNow())
