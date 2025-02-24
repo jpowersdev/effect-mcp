@@ -1,4 +1,5 @@
-import { Option } from "effect"
+import type { Option } from "effect"
+import * as Model from "../Generated.js"
 
 // Core domain models
 export interface ToolCapabilities {
@@ -21,34 +22,7 @@ export interface ServerCapabilities {
 }
 
 // Factory and operations
-export const ServerCapabilities = {
-  make: (params: {
-    tools?: { listChanged?: boolean } | undefined
-    prompts?: { listChanged?: boolean } | undefined
-    logging?: { level?: "debug" | "info" | "warn" | "error" } | undefined
-    experimental?: Record<string, unknown> | undefined
-  }): ServerCapabilities => ({
-    tools: Option.map(
-      Option.fromNullable(params.tools),
-      (tools) => ({
-        listChanged: Option.fromNullable(tools.listChanged)
-      })
-    ),
-    prompts: Option.map(
-      Option.fromNullable(params.prompts),
-      (prompts) => ({
-        listChanged: Option.fromNullable(prompts.listChanged)
-      })
-    ),
-    logging: Option.map(
-      Option.fromNullable(params.logging),
-      (logging) => ({
-        level: Option.fromNullable(logging.level)
-      })
-    ),
-    experimental: Option.fromNullable(params.experimental)
-  })
-}
+export const ServerCapabilities = Model.ServerCapabilities
 
 // Server implementation info
 export interface ServerImplementation {
@@ -57,14 +31,4 @@ export interface ServerImplementation {
   readonly protocolVersion: string
 }
 
-export const ServerImplementation = {
-  make: (params: {
-    name: string
-    version: string
-    protocolVersion: string
-  }): ServerImplementation => ({
-    name: params.name,
-    version: params.version,
-    protocolVersion: params.protocolVersion
-  })
-}
+export const ServerImplementation = Model.Implementation

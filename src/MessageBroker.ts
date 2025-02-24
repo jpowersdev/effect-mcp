@@ -1,7 +1,8 @@
-import { Deferred, Duration, Effect, Mailbox, Option, Queue, RcMap, Schedule, Stream } from "effect"
+import { Deferred, Duration, Effect, Mailbox, Option, Queue, RcMap, Schedule, Schema, Stream } from "effect"
+import type { JsonRpcRequest } from "./Domain/JsonRpc.js"
+import { JsonRpcResponse } from "./Domain/JsonRpc.js"
 import type { SessionId } from "./Domain/Session.js"
 import { SessionManager } from "./SessionManager.js"
-import type { JsonRpcRequest, JsonRpcResponse } from "./Transport.js"
 import { Transport } from "./Transport.js"
 
 export interface Message {
@@ -109,6 +110,7 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
 
         const messages = Stream.fromEffect(Deferred.await(latch)).pipe(
           Stream.zipRight(Mailbox.toStream(mailbox)),
+          Stream.mapEffect((response) => Schema.encodeUnknown(JsonRpcResponse)(response)),
           Stream.map((response) => `data:${JSON.stringify(response)}\n\n`)
         )
 

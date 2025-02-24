@@ -1,32 +1,9 @@
-import { Effect, Match, Option } from "effect"
+import { Effect, Match, Option, Schema } from "effect"
 import { CapabilityProvider } from "./CapabilityProvider.js"
+import type { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
+import { JsonRpcError, JsonRpcSuccess, ServerResult } from "./Domain/JsonRpc.js"
+import * as Model from "./Generated.js"
 import { ToolRegistry } from "./ToolRegistry.js"
-
-// Protocol types
-export interface JsonRpcRequest {
-  jsonrpc: "2.0"
-  id: Option.Option<string | number>
-  method: string
-  params: Option.Option<Record<string, unknown>>
-}
-
-export interface JsonRpcSuccess {
-  jsonrpc: "2.0"
-  id: Option.Option<string | number>
-  result: unknown
-}
-
-export interface JsonRpcError {
-  jsonrpc: "2.0"
-  id: Option.Option<string | number>
-  error: {
-    code: number
-    message: string
-    data: Option.Option<unknown>
-  }
-}
-
-export type JsonRpcResponse = JsonRpcSuccess | JsonRpcError
 
 export class Transport extends Effect.Service<Transport>()("Transport", {
   dependencies: [
@@ -37,15 +14,15 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
     const tools = yield* ToolRegistry
     const capabilities = yield* CapabilityProvider
 
-    const handleInitialize = Effect.gen(function*() {
-      const { protocolVersion, ...serverInfo } = yield* capabilities.getImplementation
-
-      return {
-        capabilities: yield* capabilities.getCapabilities,
-        serverInfo,
-        protocolVersion
-      }
-    })
+    const handleInitialize = Effect.all({
+      _meta: Effect.succeedNone,
+      capabilities: capabilities.getCapabilities,
+      serverInfo: capabilities.getImplementation,
+      protocolVersion: capabilities.getProtocolVersion,
+      instructions: Effect.succeedNone
+    }).pipe(
+      Effect.map((_) => Model.InitializeResult.make(_))
+    )
 
     const handleToolsList = tools.list
 
@@ -81,23 +58,27 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
           )
         )
 
-        return {
+        const encoded = yield* Schema.encodeUnknown(
+          ServerResult
+        )(result)
+
+        return JsonRpcSuccess.make({
           jsonrpc: "2.0",
           id: request.id,
-          result
-        } as const
+          result: encoded
+        })
       }).pipe(
         Effect.catchAll((error) =>
           Effect.succeed(
-            {
+            JsonRpcError.make({
               jsonrpc: "2.0",
               id: request.id,
               error: {
-                code: error.code ?? -32000,
+                code: -32000,
                 message: error.message ?? "Internal error",
                 data: Option.none()
               }
-            } as const
+            })
           )
         ),
         Effect.withSpan("Transport.handle", {
