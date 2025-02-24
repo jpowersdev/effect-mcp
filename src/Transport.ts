@@ -1,4 +1,4 @@
-import { Effect, Match, Option, Schema } from "effect"
+import { Effect, Match, Option, Predicate, Schema } from "effect"
 import { CapabilityProvider } from "./CapabilityProvider.js"
 import type { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
 import { JsonRpcError, JsonRpcSuccess, ServerResult } from "./Domain/JsonRpc.js"
@@ -28,7 +28,13 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
       Effect.map((_) => Model.InitializeResult.make(_))
     )
 
-    const handleToolsList = tools.list
+    const handleToolsList = Effect.all({
+      _meta: Effect.succeedNone,
+      tools: tools.list,
+      nextCursor: Effect.succeedNone
+    }).pipe(
+      Effect.map((_) => Model.ListToolsResult.make(_))
+    )
 
     const handleToolsCall = (params: Record<string, unknown>) =>
       tools.call(params as any).pipe(
@@ -44,13 +50,13 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
         )
       )
 
-    const handle = (sessionId: SessionId, request: JsonRpcRequest): Effect.Effect<JsonRpcResponse> =>
+    const handle = (sessionId: SessionId, request: JsonRpcRequest): Effect.Effect<JsonRpcResponse | undefined> =>
       Effect.gen(function*() {
         const result = yield* Match.value(request.method).pipe(
           Match.when("initialize", () => handleInitialize),
           Match.when("notifications/initialized", () =>
             sessions.activateById(sessionId).pipe(
-              Effect.tap(() => Effect.log("activated session").pipe(Effect.annotateLogs({ sessionId })))
+              Effect.asVoid
             )),
           Match.when("tools/list", () => handleToolsList),
           Match.when("tools/call", () =>
@@ -66,9 +72,18 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
           )
         )
 
+        if (Predicate.isNullable(result)) {
+          return
+        }
+
         const encoded = yield* Schema.encodeUnknown(
           ServerResult
         )(result)
+
+        yield* Effect.log("RESULT", {
+          result,
+          encoded
+        })
 
         return JsonRpcSuccess.make({
           jsonrpc: "2.0",

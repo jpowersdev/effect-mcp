@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Inspectable, Option, Schema } from "effect"
 import * as Model from "../Generated.js"
 
 export const JsonRpcMessage = Schema.Struct({
@@ -21,7 +21,32 @@ export class JsonRpcRequest extends Schema.Class<JsonRpcRequest>("JsonRpcRequest
     Schema.Any,
     { as: "Option", exact: true }
   )
-}) {}
+}) {
+  [Inspectable.NodeInspectSymbol]() {
+    return this.toJSON()
+  }
+
+  toJSON() {
+    const json = {
+      _id: "JsonRpcRequest",
+      method: this.method
+    }
+
+    if (Option.isSome(this.id)) {
+      Object.assign(json, {
+        id: this.id.value
+      })
+    }
+
+    if (Option.isSome(this.params)) {
+      Object.assign(json, {
+        params: this.params.value
+      })
+    }
+
+    return json
+  }
+}
 
 export class JsonRpcSuccess extends Schema.Class<JsonRpcSuccess>("JsonRpcSuccess")({
   ...JsonRpcMessage.fields,
@@ -30,7 +55,26 @@ export class JsonRpcSuccess extends Schema.Class<JsonRpcSuccess>("JsonRpcSuccess
     { as: "Option" }
   ),
   result: Schema.Unknown
-}) {}
+}) {
+  [Inspectable.NodeInspectSymbol]() {
+    return this.toJSON()
+  }
+
+  toJSON() {
+    const json = {
+      _id: "JsonRpcSuccess",
+      result: this.result
+    }
+
+    if (Option.isSome(this.id)) {
+      Object.assign(json, {
+        id: this.id.value
+      })
+    }
+
+    return json
+  }
+}
 
 export class JsonRpcError extends Schema.Class<JsonRpcError>("JsonRpcError")({
   ...JsonRpcMessage.fields,
@@ -43,7 +87,26 @@ export class JsonRpcError extends Schema.Class<JsonRpcError>("JsonRpcError")({
     message: Schema.String,
     data: Schema.Option(Schema.Unknown)
   })
-}) {}
+}) {
+  [Inspectable.NodeInspectSymbol]() {
+    return this.toJSON()
+  }
+
+  toJSON() {
+    const json = {
+      _id: "JsonRpcError",
+      error: this.error
+    }
+
+    if (Option.isSome(this.id)) {
+      Object.assign(json, {
+        id: this.id.value
+      })
+    }
+
+    return json
+  }
+}
 
 export const JsonRpcResponse = Schema.Union(
   JsonRpcSuccess,
@@ -58,7 +121,26 @@ export class JsonRpcNotification extends Schema.Class<JsonRpcNotification>("JSON
     Schema.Any,
     { as: "Option", exact: true }
   )
-}) {}
+}) {
+  [Inspectable.NodeInspectSymbol]() {
+    return this.toJSON()
+  }
+
+  toJSON() {
+    const json = {
+      _id: "JsonRpcNotification",
+      method: this.method
+    }
+
+    if (Option.isSome(this.params)) {
+      Object.assign(json, {
+        params: this.params.value
+      })
+    }
+
+    return json
+  }
+}
 
 export const ServerResult = Schema.Union(
   Model.InitializeResult,

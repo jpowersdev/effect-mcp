@@ -22,10 +22,11 @@ export class ToolRegistry extends Effect.Service<ToolRegistry>()("ToolRegistry",
     // Built-in tools
     const getNameTool = Tool.make({
       name: "GetName",
-      description: "Get the current user's name",
+      description: Option.some("Get the current user's name"),
       inputSchema: {
-        properties: {},
-        required: []
+        properties: Option.some({}),
+        required: Option.some([]),
+        type: "object"
       }
     })
 
@@ -42,11 +43,6 @@ export class ToolRegistry extends Effect.Service<ToolRegistry>()("ToolRegistry",
       )
 
     const list = Effect.sync(() => Array.from(tools.values())).pipe(
-      Effect.tap((tools) =>
-        Effect.log("tools").pipe(
-          Effect.annotateLogs({ tools })
-        )
-      ),
       Effect.withSpan("ToolRegistry.list")
     )
 
