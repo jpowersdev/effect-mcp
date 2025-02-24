@@ -50,13 +50,16 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
         )
       )
 
+    const encode = Schema.encodeUnknown(ServerResult)
+
     const handle = (sessionId: SessionId, request: JsonRpcRequest): Effect.Effect<JsonRpcResponse | undefined> =>
       Effect.gen(function*() {
         const result = yield* Match.value(request.method).pipe(
           Match.when("initialize", () => handleInitialize),
+          Match.when("ping", () => Effect.succeed(undefined)),
           Match.when("notifications/initialized", () =>
             sessions.activateById(sessionId).pipe(
-              Effect.asVoid
+              Effect.andThen(() => Effect.succeedNone)
             )),
           Match.when("tools/list", () => handleToolsList),
           Match.when("tools/call", () =>
@@ -72,23 +75,31 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
           )
         )
 
-        if (Predicate.isNullable(result)) {
+        /**
+         * Option.none means return nothing
+         */
+        if (Option.isOption(result) && Option.isNone(result)) {
           return
         }
 
-        const encoded = yield* Schema.encodeUnknown(
-          ServerResult
-        )(result)
+        /**
+         * Undefined means return an empty object
+         */
+        if (Predicate.isUndefined(result)) {
+          return JsonRpcSuccess.make({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: {}
+          })
+        }
 
-        yield* Effect.log("RESULT", {
-          result,
-          encoded
-        })
-
+        /**
+         * Otherwise, encode the result for transport
+         */
         return JsonRpcSuccess.make({
           jsonrpc: "2.0",
           id: request.id,
-          result: encoded
+          result: yield* encode(result)
         })
       }).pipe(
         Effect.catchAll((error) =>

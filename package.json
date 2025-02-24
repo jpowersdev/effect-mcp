@@ -27,7 +27,8 @@
     "clean": "node scripts/clean.mjs",
     "coverage": "vitest run --coverage",
     "dev": "nodemon",
-    "test": "vitest"
+    "test": "vitest",
+    "inspect": "pnpm dlx @modelcontextprotocol/inspector"
   },
   "dependencies": {
     "@effect/experimental": "^0.41.2",
@@ -59,6 +60,7 @@
     "@eslint/eslintrc": "^3.3.0",
     "@eslint/js": "^9.21.0",
     "@jpowersdev/jsonschema-gen": "^0.0.3",
+    "@modelcontextprotocol/inspector": "^0.4.1",
     "@types/node": "^22.13.5",
     "@typescript-eslint/eslint-plugin": "^8.24.1",
     "@typescript-eslint/parser": "^8.24.1",

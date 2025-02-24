@@ -7,7 +7,7 @@ import {
   HttpServerResponse
 } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { Effect, Layer, Stream } from "effect"
+import { Config, Effect, Layer, Stream } from "effect"
 import { createServer } from "http"
 import { Api } from "./Api.js"
 import { CurrentSession } from "./Domain/Session.js"
@@ -73,7 +73,13 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
   Layer.provide(HttpMcpLive)
 )
 
-const ServerLive = NodeHttpServer.layer(createServer, { port: 3000 })
+const ServerLive = Layer.unwrapEffect(
+  Effect.gen(function*() {
+    const port = yield* Config.number("PORT")
+
+    return NodeHttpServer.layer(createServer, { port })
+  })
+)
 
 // Set up the server using NodeHttpServer on port 3000
 export const HttpLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(

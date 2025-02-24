@@ -101,7 +101,7 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
         const mailbox = yield* RcMap.get(mailboxes, sessionId)
 
         // Create endpoint URL for client publishing
-        const endpoint = `http://localhost:3000/messages?sessionId=${sessionId}`
+        const endpoint = `/messages?sessionId=${sessionId}`
 
         // Create initial greeting with endpoint
         const greeting = Stream.make(`event: endpoint\ndata: ${endpoint}\n\n`)
