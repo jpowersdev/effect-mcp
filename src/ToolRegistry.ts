@@ -24,8 +24,8 @@ export class ToolRegistry extends Effect.Service<ToolRegistry>()("ToolRegistry",
       name: "GetName",
       description: Option.some("Get the current user's name"),
       inputSchema: {
-        properties: Option.some({}),
-        required: Option.some([]),
+        properties: Option.none(),
+        required: Option.none(),
         type: "object"
       }
     })
