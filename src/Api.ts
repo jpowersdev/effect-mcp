@@ -1,7 +1,7 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "@effect/platform"
 import { Schema } from "effect"
 import { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
-import { SessionNotFoundError } from "./Session.js"
+import { SessionError, SessionId } from "./Domain/Session.js"
 
 export class McpApi extends HttpApiGroup.make("mcp")
   .add(
@@ -12,10 +12,10 @@ export class McpApi extends HttpApiGroup.make("mcp")
   .add(
     HttpApiEndpoint.post("send-message")`/messages`
       .setUrlParams(Schema.Struct({
-        sessionId: Schema.String
+        sessionId: SessionId
       }))
       .setPayload(JsonRpcRequest)
-      .addError(SessionNotFoundError, { status: 404 })
+      .addError(SessionError, { status: 404 })
       .addSuccess(Schema.Boolean, { status: 200 })
       .annotate(OpenApi.Title, "Create a Message")
       .annotate(OpenApi.Description, "Create a new message")

@@ -10,16 +10,17 @@ import { NodeHttpServer } from "@effect/platform-node"
 import { Effect, Layer, Stream } from "effect"
 import { createServer } from "http"
 import { Api } from "./Api.js"
-import { Mailbox } from "./Mailbox.js"
-import { CurrentSession, Sessions } from "./Session.js"
+import { CurrentSession } from "./Domain/Session.js"
+import { MessageBroker } from "./MessageBroker.js"
+import { SessionManager } from "./SessionManager.js"
 
 export const HttpMcpLive = HttpApiBuilder.group(
   Api,
   "mcp",
   (handlers) =>
     Effect.gen(function*() {
-      const mailbox = yield* Mailbox
-      const sessions = yield* Sessions
+      const broker = yield* MessageBroker
+      const sessions = yield* SessionManager
 
       return handlers
         .handleRaw("index", () =>
@@ -27,31 +28,38 @@ export const HttpMcpLive = HttpApiBuilder.group(
             Effect.orDie
           ))
         .handle("send-message", ({ payload, urlParams }) =>
-          mailbox.offer(payload).pipe(
-            Effect.annotateLogs({
-              "session.id": urlParams.sessionId
-            }),
-            Effect.annotateSpans({
-              "session.id": urlParams.sessionId
-            }),
+          broker.offer({
+            payload,
+            sessionId: urlParams.sessionId
+          }).pipe(
+            Effect.annotateLogs({ "session.id": urlParams.sessionId }),
+            Effect.annotateSpans({ "session.id": urlParams.sessionId }),
             Effect.provideServiceEffect(
               CurrentSession,
               sessions.findById(urlParams.sessionId)
             )
           ))
         .handleRaw("message-stream", () =>
-          HttpServerResponse.stream(Stream.encodeText(sessions.begin), {
-            headers: Headers.fromInput({
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              Connection: "keep-alive"
+          Effect.gen(function*() {
+            // Activate the session
+            const session = yield* sessions.initialize
+
+            // Get message stream for session
+            const messageStream = yield* broker.messages(session.id)
+
+            return HttpServerResponse.stream(Stream.encodeText(messageStream), {
+              headers: Headers.fromInput({
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                Connection: "keep-alive"
+              })
             })
           }))
     })
 ).pipe(
   Layer.provide([
-    Mailbox.Default,
-    Sessions.Default
+    MessageBroker.Default,
+    SessionManager.Default
   ])
 )
 

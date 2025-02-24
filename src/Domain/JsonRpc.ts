@@ -13,7 +13,13 @@ export class JsonRpcRequest extends Schema.Class<JsonRpcRequest>("JsonRpcRequest
   ...JsonRpcMessage.fields,
   id: Schema.optionalWith(Schema.Union(Schema.String, Schema.Number), { as: "Option" }),
   method: Schema.String,
-  params: Schema.optionalWith(Schema.Any, { as: "Option" })
+  params: Schema.optionalWith(
+    Schema.Record({
+      key: Schema.String,
+      value: Schema.Unknown
+    }),
+    { as: "Option", exact: true }
+  )
 }) {}
 
 export class JsonRpcSuccess extends Schema.Class<JsonRpcSuccess>("JsonRpcSuccess")({

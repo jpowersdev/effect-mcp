@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto"
 import { Effect, Option, TMap } from "effect"
-import { Session, SessionError } from "./Domain/Session.js"
+import type { Session } from "./Domain/Session.js"
+import { makeSession, SessionError, SessionId } from "./Domain/Session.js"
 
 export class SessionManager extends Effect.Service<SessionManager>()("SessionManager", {
   dependencies: [],
@@ -8,8 +9,8 @@ export class SessionManager extends Effect.Service<SessionManager>()("SessionMan
     const sessions = yield* TMap.make<string, Session>()
 
     const initialize = Effect.sync(() => {
-      const id = randomUUID()
-      return Session.make(id)
+      const id = SessionId.make(randomUUID())
+      return makeSession(id)
     }).pipe(
       Effect.tap((session) => TMap.set(sessions, session.id, session)),
       Effect.withSpan("SessionManager.initialize")
@@ -29,7 +30,7 @@ export class SessionManager extends Effect.Service<SessionManager>()("SessionMan
 
     const activateById = (id: string) =>
       findById(id).pipe(
-        Effect.map(Session.activate),
+        Effect.map((session) => session.activate()),
         Effect.tap((session) => TMap.set(sessions, id, session)),
         Effect.withSpan("SessionManager.activate", {
           attributes: { sessionId: id }

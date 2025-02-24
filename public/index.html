@@ -72,6 +72,9 @@
   </head>
   <body>
     <div x-data="messages" class="container my-3">
+      <div class="mb-2">
+        <code x-text="endpoint"></code>
+      </div>
       <form x-ref="request" @submit.prevent="send(method, params)">
         <div class="mb-3">
           <label class="form-label" for="messageType">Message Type</label>
