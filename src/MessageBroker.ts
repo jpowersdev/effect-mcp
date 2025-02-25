@@ -1,4 +1,4 @@
-import { Duration, Effect, Mailbox, Option, Predicate, Queue, RcMap, Schedule, Schema, Stream } from "effect"
+import { Duration, Effect, Mailbox, Option, Predicate, Queue, RcMap, Schedule, Schema, Stream, Struct } from "effect"
 import { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
 import type { SessionId } from "./Domain/Session.js"
 import { SessionManager } from "./SessionManager.js"
@@ -129,6 +129,7 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
               Effect.annotateLogs({ response })
             )
           ),
+          Stream.map((_) => Struct.omit(_ as any, "_tag")),
           Stream.mapEffect((response) => Schema.encodeUnknown(Schema.parseJson(JsonRpcResponse))(response)),
           Stream.map((response) => `event: message\ndata: ${response}\n\n`)
         )
