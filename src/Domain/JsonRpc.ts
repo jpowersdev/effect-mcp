@@ -23,10 +23,6 @@ export class JsonRpcRequest extends Schema.Class<JsonRpcRequest>("JsonRpcRequest
   )
 }) {
   [Inspectable.NodeInspectSymbol]() {
-    return this.toJSON()
-  }
-
-  toJSON() {
     const json = {
       _id: "JsonRpcRequest",
       method: this.method
@@ -57,10 +53,6 @@ export class JsonRpcSuccess extends Schema.Class<JsonRpcSuccess>("JsonRpcSuccess
   result: Schema.Unknown
 }) {
   [Inspectable.NodeInspectSymbol]() {
-    return this.toJSON()
-  }
-
-  toJSON() {
     const json = {
       _id: "JsonRpcSuccess",
       result: this.result
@@ -89,10 +81,6 @@ export class JsonRpcError extends Schema.Class<JsonRpcError>("JsonRpcError")({
   })
 }) {
   [Inspectable.NodeInspectSymbol]() {
-    return this.toJSON()
-  }
-
-  toJSON() {
     const json = {
       _id: "JsonRpcError",
       error: this.error
@@ -123,10 +111,6 @@ export class JsonRpcNotification extends Schema.Class<JsonRpcNotification>("JSON
   )
 }) {
   [Inspectable.NodeInspectSymbol]() {
-    return this.toJSON()
-  }
-
-  toJSON() {
     const json = {
       _id: "JsonRpcNotification",
       method: this.method
