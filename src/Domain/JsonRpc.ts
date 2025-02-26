@@ -127,15 +127,17 @@ export class JsonRpcNotification extends Schema.Class<JsonRpcNotification>("JSON
 }
 
 export const ServerResult = Schema.Union(
+  Model.CallToolResult,
+  Model.CompleteResult,
+  Model.CreateMessageResult,
+  Model.GetPromptResult,
   Model.InitializeResult,
+  Model.ListPromptsResult,
   Model.ListResourcesResult,
   Model.ListResourceTemplatesResult,
-  Model.ReadResourceResult,
-  Model.ListPromptsResult,
-  Model.GetPromptResult,
+  Model.ListRootsResult,
   Model.ListToolsResult,
-  Model.CallToolResult,
-  Model.CompleteResult
+  Model.ReadResourceResult
 )
 
 export type ServerResult = Schema.Schema.Type<typeof ServerResult>

@@ -24,7 +24,10 @@ export class CapabilityProvider extends Effect.Service<CapabilityProvider>()("Ca
         level: "info"
       }),
       experimental: Option.none(),
-      resources: Option.none()
+      resources: Option.some({
+        listChanged: Option.none(),
+        subscribe: Option.none()
+      })
     })
 
     const getProtocolVersion = Effect.succeed(protocolVersion)

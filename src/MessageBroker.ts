@@ -1,5 +1,6 @@
 import { Duration, Effect, Mailbox, Option, Predicate, Queue, RcMap, Schedule, Schema, Stream, Struct } from "effect"
-import { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
+import type { JsonRpcRequest } from "./Domain/JsonRpc.js"
+import { JsonRpcNotification, JsonRpcResponse } from "./Domain/JsonRpc.js"
 import type { SessionId } from "./Domain/Session.js"
 import { SessionManager } from "./SessionManager.js"
 import { Transport } from "./Transport.js"
@@ -109,10 +110,9 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
         // Create recurring ping stream every 30 seconds
         const ping = Stream.fromSchedule(Schedule.spaced("30 seconds")).pipe(
           Stream.map(() => {
-            const payload = JsonRpcRequest.make({
+            const payload = JsonRpcNotification.make({
               jsonrpc: "2.0",
               method: "ping",
-              id: Option.none(),
               params: Option.none()
             })
 

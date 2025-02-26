@@ -4,6 +4,7 @@ import type { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
 import { JsonRpcError, JsonRpcSuccess, ServerResult } from "./Domain/JsonRpc.js"
 import type { SessionId } from "./Domain/Session.js"
 import * as Model from "./Generated.js"
+import { ResourceProvider } from "./ResourceProvider.js"
 import { SessionManager } from "./SessionManager.js"
 import { ToolRegistry } from "./ToolRegistry.js"
 
@@ -11,12 +12,14 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
   dependencies: [
     ToolRegistry.Default,
     CapabilityProvider.Default,
-    SessionManager.Default
+    SessionManager.Default,
+    ResourceProvider.Default
   ],
   scoped: Effect.gen(function*() {
     const tools = yield* ToolRegistry
     const capabilities = yield* CapabilityProvider
     const sessions = yield* SessionManager
+    const resources = yield* ResourceProvider
 
     const handleInitialize = Effect.all({
       _meta: Effect.succeedNone,
@@ -50,6 +53,24 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
         )
       )
 
+    const handleResourcesList = Effect.all({
+      _meta: Effect.succeedNone,
+      resources: resources.list,
+      nextCursor: Effect.succeedNone
+    }).pipe(
+      Effect.map((_) => Model.ListResourcesResult.make(_))
+    )
+
+    const handleResourcesRead = (params: { uri: string }) =>
+      resources.read(params.uri).pipe(
+        Effect.map((contents) =>
+          Model.ReadResourceResult.make({
+            _meta: Option.none(),
+            contents
+          })
+        )
+      )
+
     const encode = Schema.encodeUnknown(ServerResult)
 
     const handle = (sessionId: SessionId, request: JsonRpcRequest): Effect.Effect<JsonRpcResponse | undefined> =>
@@ -61,10 +82,29 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
             sessions.activateById(sessionId).pipe(
               Effect.andThen(() => Effect.succeedNone)
             )),
+          Match.when("notifications/cancelled", () =>
+            sessions.deactivateById(sessionId).pipe(
+              Effect.andThen(() => Effect.succeedNone)
+            )),
           Match.when("tools/list", () => handleToolsList),
           Match.when("tools/call", () =>
             handleToolsCall(
               Option.getOrElse(request.params, () => ({}))
+            )),
+          Match.when("resources/list", () => handleResourcesList),
+          Match.when("resources/templates/list", () =>
+            Effect.succeed(
+              Model.ListResourceTemplatesResult.make({
+                _meta: Option.none(),
+                nextCursor: Option.none(),
+                resourceTemplates: []
+              })
+            )),
+          Match.when("resources/read", () =>
+            request.params.pipe(
+              Option.getOrElse(() => ({})),
+              Schema.decodeUnknown(Model.ReadResourceRequest.fields.params),
+              Effect.andThen((params) => handleResourcesRead(params))
             )),
           Match.orElse(() =>
             Effect.fail({
