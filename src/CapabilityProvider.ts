@@ -25,8 +25,9 @@ export class CapabilityProvider extends Effect.Service<CapabilityProvider>()("Ca
       }),
       experimental: Option.none(),
       resources: Option.some({
-        listChanged: Option.none(),
-        subscribe: Option.none()
+        listChanged: Option.some(true),
+        subscribe: Option.none(),
+        templates: Option.some(true)
       })
     })
 

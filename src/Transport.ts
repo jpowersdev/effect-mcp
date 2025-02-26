@@ -61,6 +61,14 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
       Effect.map((_) => Model.ListResourcesResult.make(_))
     )
 
+    const handleResourcesTemplatesList = Effect.all({
+      _meta: Effect.succeedNone,
+      resourceTemplates: resources.listTemplates,
+      nextCursor: Effect.succeedNone
+    }).pipe(
+      Effect.map((_) => Model.ListResourceTemplatesResult.make(_))
+    )
+
     const handleResourcesRead = (params: { uri: string }) =>
       resources.read(params.uri).pipe(
         Effect.map((contents) =>
@@ -92,14 +100,7 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
               Option.getOrElse(request.params, () => ({}))
             )),
           Match.when("resources/list", () => handleResourcesList),
-          Match.when("resources/templates/list", () =>
-            Effect.succeed(
-              Model.ListResourceTemplatesResult.make({
-                _meta: Option.none(),
-                nextCursor: Option.none(),
-                resourceTemplates: []
-              })
-            )),
+          Match.when("resources/templates/list", () => handleResourcesTemplatesList),
           Match.when("resources/read", () =>
             request.params.pipe(
               Option.getOrElse(() => ({})),
