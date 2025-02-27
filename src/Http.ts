@@ -11,7 +11,7 @@ import { Config, Effect, Layer, Stream } from "effect"
 import { createServer } from "http"
 import { Api } from "./Api.js"
 import { CurrentSession } from "./Domain/Session.js"
-import { MessageBroker } from "./MessageBroker.js"
+import { messageAnnotations, MessageBroker } from "./MessageBroker.js"
 import { SessionManager } from "./SessionManager.js"
 
 export const HttpMcpLive = HttpApiBuilder.group(
@@ -28,16 +28,15 @@ export const HttpMcpLive = HttpApiBuilder.group(
             Effect.orDie
           ))
         .handle("send-message", ({ payload, urlParams }) =>
-          broker.offer({
-            payload,
-            sessionId: urlParams.sessionId
-          }).pipe(
+          Effect.zipRight(
+            Effect.logDebug(payload),
+            broker.offer({
+              payload,
+              sessionId: urlParams.sessionId
+            })
+          ).pipe(
             Effect.tap(() => Effect.log("Received message")),
-            Effect.annotateLogs({
-              "mcp.method": payload.method,
-              "mcp.id": payload.id,
-              "session.id": urlParams.sessionId
-            }),
+            Effect.annotateLogs(messageAnnotations({ payload, sessionId: urlParams.sessionId })),
             Effect.annotateSpans({ "session.id": urlParams.sessionId }),
             Effect.provideServiceEffect(
               CurrentSession,

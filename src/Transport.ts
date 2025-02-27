@@ -1,9 +1,10 @@
 import { Effect, Match, Option, Predicate, Schema } from "effect"
 import { CapabilityProvider } from "./CapabilityProvider.js"
-import type { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
-import { JsonRpcError, JsonRpcSuccess, ServerResult } from "./Domain/JsonRpc.js"
+import { ClientRequest, JsonRpcError, JsonRpcRequest, JsonRpcSuccess, ServerResult } from "./Domain/JsonRpc.js"
 import type { SessionId } from "./Domain/Session.js"
 import * as Model from "./Generated.js"
+import { messageAnnotations } from "./MessageBroker.js"
+import { PromptProvider } from "./PromptProvider.js"
 import { ResourceProvider } from "./ResourceProvider.js"
 import { SessionManager } from "./SessionManager.js"
 import { ToolRegistry } from "./ToolRegistry.js"
@@ -13,13 +14,15 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
     ToolRegistry.Default,
     CapabilityProvider.Default,
     SessionManager.Default,
-    ResourceProvider.Default
+    ResourceProvider.Default,
+    PromptProvider.Default
   ],
   scoped: Effect.gen(function*() {
     const tools = yield* ToolRegistry
     const capabilities = yield* CapabilityProvider
     const sessions = yield* SessionManager
     const resources = yield* ResourceProvider
+    const prompts = yield* PromptProvider
 
     const handleInitialize = Effect.all({
       _meta: Effect.succeedNone,
@@ -79,34 +82,55 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
         )
       )
 
-    const encode = Schema.encodeUnknown(ServerResult)
+    const handlePromptsList = Effect.all({
+      _meta: Effect.succeedNone,
+      prompts: prompts.list,
+      nextCursor: Effect.succeedNone
+    }).pipe(
+      Effect.map((_) => Model.ListPromptsResult.make(_))
+    )
 
-    const handle = (sessionId: SessionId, request: JsonRpcRequest): Effect.Effect<JsonRpcResponse | undefined> =>
+    const handlePromptsGet = (request: Model.GetPromptRequest) =>
+      prompts.get(request).pipe(
+        Effect.map(({ messages }) =>
+          Model.GetPromptResult.make({
+            _meta: Option.none(),
+            description: Option.none(),
+            messages
+          })
+        )
+      )
+
+    const encode = Schema.encodeUnknown(ServerResult, { onExcessProperty: "preserve" })
+
+    const handle = (
+      sessionId: SessionId,
+      request: JsonRpcRequest
+    ) =>
       Effect.gen(function*() {
-        const result = yield* Match.value(request.method).pipe(
-          Match.when("initialize", () => handleInitialize),
-          Match.when("ping", () => Effect.succeed(undefined)),
-          Match.when("notifications/initialized", () =>
-            sessions.activateById(sessionId).pipe(
-              Effect.andThen(() => Effect.succeedNone)
-            )),
-          Match.when("notifications/cancelled", () =>
-            sessions.deactivateById(sessionId).pipe(
-              Effect.andThen(() => Effect.succeedNone)
-            )),
-          Match.when("tools/list", () => handleToolsList),
-          Match.when("tools/call", () =>
-            handleToolsCall(
-              Option.getOrElse(request.params, () => ({}))
-            )),
-          Match.when("resources/list", () => handleResourcesList),
-          Match.when("resources/templates/list", () => handleResourcesTemplatesList),
-          Match.when("resources/read", () =>
-            request.params.pipe(
-              Option.getOrElse(() => ({})),
-              Schema.decodeUnknown(Model.ReadResourceRequest.fields.params),
-              Effect.andThen((params) => handleResourcesRead(params))
-            )),
+        const decoded = yield* Schema.encode(JsonRpcRequest)(request).pipe(
+          Effect.andThen((result) => Schema.decodeUnknown(ClientRequest)(result))
+        )
+        const result = yield* Match.value(decoded).pipe(
+          Match.discriminators("method")({
+            initialize: () => handleInitialize,
+            ping: () => Effect.succeed(undefined),
+            "notifications/initialized": () =>
+              sessions.activateById(sessionId).pipe(
+                Effect.andThen(() => Effect.succeedNone)
+              ),
+            "notifications/cancelled": () =>
+              sessions.deactivateById(sessionId).pipe(
+                Effect.andThen(() => Effect.succeedNone)
+              ),
+            "tools/list": () => handleToolsList,
+            "tools/call": (request) => handleToolsCall(request.params),
+            "resources/list": () => handleResourcesList,
+            "resources/templates/list": () => handleResourcesTemplatesList,
+            "resources/read": (request) => handleResourcesRead(request.params),
+            "prompts/list": () => handlePromptsList,
+            "prompts/get": (request) => handlePromptsGet(request)
+          }),
           Match.orElse(() =>
             Effect.fail({
               code: -32601,
@@ -129,7 +153,7 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
         if (Predicate.isUndefined(result)) {
           return JsonRpcSuccess.make({
             jsonrpc: "2.0",
-            id: request.id,
+            id: Option.fromNullable(request.id),
             result: {}
           })
         }
@@ -139,15 +163,16 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
          */
         return JsonRpcSuccess.make({
           jsonrpc: "2.0",
-          id: request.id,
+          id: Option.fromNullable(request.id),
           result: yield* encode(result)
         })
       }).pipe(
+        Effect.tapErrorCause(Effect.logError),
         Effect.catchAll((error) =>
           Effect.succeed(
             JsonRpcError.make({
               jsonrpc: "2.0",
-              id: request.id,
+              id: Option.fromNullable(request.id),
               error: {
                 code: -32000,
                 message: error.message ?? "Internal error",
@@ -157,12 +182,7 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
           )
         ),
         Effect.withSpan("Transport.handle", {
-          attributes: {
-            "mcp.method": request.method,
-            "mcp.id": Option.getOrUndefined(request.id),
-            "mcp.params": Option.getOrUndefined(request.params),
-            "mcp.session_id": sessionId
-          }
+          attributes: messageAnnotations({ payload: request, sessionId })
         })
       )
 

@@ -19,13 +19,15 @@ export class CapabilityProvider extends Effect.Service<CapabilityProvider>()("Ca
         listChanged: Option.none()
       }),
       // Only enable features we actually support
-      prompts: Option.none(),
+      prompts: Option.some({
+        listChanged: Option.none()
+      }),
       logging: Option.some({
         level: "info"
       }),
       experimental: Option.none(),
       resources: Option.some({
-        listChanged: Option.some(true),
+        listChanged: Option.none(),
         subscribe: Option.none(),
         templates: Option.some(true)
       })

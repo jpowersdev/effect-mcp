@@ -1,6 +1,6 @@
 import { Duration, Effect, Mailbox, Option, Predicate, Queue, RcMap, Schedule, Schema, Stream, Struct } from "effect"
 import type { JsonRpcRequest } from "./Domain/JsonRpc.js"
-import { JsonRpcNotification, JsonRpcResponse } from "./Domain/JsonRpc.js"
+import { JsonRpcError, JsonRpcNotification, JsonRpcResponse } from "./Domain/JsonRpc.js"
 import type { SessionId } from "./Domain/Session.js"
 import { SessionManager } from "./SessionManager.js"
 import { Transport } from "./Transport.js"
@@ -8,6 +8,35 @@ import { Transport } from "./Transport.js"
 export interface Message {
   readonly sessionId: SessionId
   readonly payload: JsonRpcRequest
+}
+
+export const messageAnnotations = (message: Message) => {
+  const annotations = {
+    "session.id": message.sessionId,
+    "mcp.method": message.payload.method
+  }
+
+  if (Predicate.hasProperty(message.payload, "id")) {
+    if (Option.isOption(message.payload.id)) {
+      if (Option.isSome(message.payload.id)) {
+        Object.assign(annotations, {
+          "mcp.id": message.payload.id.value
+        })
+      }
+    }
+  }
+
+  if (Predicate.hasProperty(message.payload, "params")) {
+    if (Option.isOption(message.payload.params)) {
+      if (Option.isSome(message.payload.params)) {
+        Object.assign(annotations, {
+          "mcp.params": message.payload.params.value
+        })
+      }
+    }
+  }
+
+  return annotations
 }
 
 export class MessageBrokerError extends Schema.TaggedError<MessageBrokerError>()("MessageBrokerError", {
@@ -38,14 +67,17 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
           Effect.tapErrorCause(Effect.logError),
           Effect.catchAllCause((cause) =>
             Effect.logError(cause).pipe(
-              Effect.map(() => ({
-                jsonrpc: "2.0",
-                id: payload.id,
-                error: {
-                  code: -32000,
-                  message: "Internal server error"
-                }
-              } as JsonRpcResponse))
+              Effect.map(() =>
+                JsonRpcError.make({
+                  jsonrpc: "2.0",
+                  id: Option.fromNullable(payload.id),
+                  error: {
+                    data: Option.none(),
+                    code: -32000,
+                    message: "Internal server error"
+                  }
+                })
+              )
             )
           ),
           Effect.tap((response) =>
@@ -59,26 +91,7 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
               return yield* mailbox.offer(response)
             })
           ),
-          (self) => {
-            const annotations = {
-              "mcp.method": payload.method,
-              "session.id": sessionId
-            }
-
-            if (Option.isSome(payload.id)) {
-              Object.assign(annotations, {
-                "mcp.id": payload.id.value
-              })
-            }
-
-            if (Option.isSome(payload.params)) {
-              Object.assign(annotations, {
-                "mcp.params": payload.params.value
-              })
-            }
-
-            return self.pipe(Effect.annotateLogs(annotations))
-          },
+          Effect.annotateLogs(messageAnnotations({ payload, sessionId })),
           Effect.whenEffect(
             Effect.map(
               sessions.findById(sessionId),
@@ -148,11 +161,7 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
     const offer = (message: Message) =>
       queue.offer(message).pipe(
         Effect.withSpan("MessageBroker.offer", {
-          attributes: {
-            "mcp.method": message.payload.method,
-            "mcp.id": Option.getOrUndefined(message.payload.id),
-            "mcp.params": Option.getOrUndefined(message.payload.params)
-          }
+          attributes: messageAnnotations(message)
         })
       )
 

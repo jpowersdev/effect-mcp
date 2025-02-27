@@ -13,14 +13,10 @@ export const JsonRpcMessage = Schema.Struct({
 export class JsonRpcRequest extends Schema.Class<JsonRpcRequest>("JsonRpcRequest")({
   ...JsonRpcMessage.fields,
   method: Schema.String,
-  id: Schema.optionalWith(
-    Schema.Union(Schema.String, Schema.Number),
-    { as: "Option" }
+  id: Schema.optional(
+    Schema.Union(Schema.String, Schema.Number)
   ),
-  params: Schema.optionalWith(
-    Schema.Any,
-    { as: "Option", exact: true }
-  )
+  params: Schema.optionalWith(Schema.Any, { exact: true })
 }) {
   [Inspectable.NodeInspectSymbol]() {
     const json = {
@@ -28,15 +24,15 @@ export class JsonRpcRequest extends Schema.Class<JsonRpcRequest>("JsonRpcRequest
       method: this.method
     }
 
-    if (Option.isSome(this.id)) {
+    if (this.id) {
       Object.assign(json, {
-        id: this.id.value
+        id: this.id
       })
     }
 
-    if (Option.isSome(this.params)) {
+    if (this.params) {
       Object.assign(json, {
-        params: this.params.value
+        params: this.params
       })
     }
 
@@ -105,10 +101,7 @@ export type JsonRpcResponse = Schema.Schema.Type<typeof JsonRpcResponse>
 export class JsonRpcNotification extends Schema.Class<JsonRpcNotification>("JSONRPCNotification")({
   ...JsonRpcMessage.fields,
   method: Schema.String,
-  params: Schema.optionalWith(
-    Schema.Any,
-    { as: "Option", exact: true }
-  )
+  params: Schema.optionalWith(Schema.Any, { exact: true })
 }) {
   [Inspectable.NodeInspectSymbol]() {
     const json = {
@@ -126,6 +119,25 @@ export class JsonRpcNotification extends Schema.Class<JsonRpcNotification>("JSON
   }
 }
 
+export const ClientRequest = Schema.Union(
+  Model.CallToolRequest,
+  Model.CompleteRequest,
+  Model.CreateMessageRequest,
+  Model.GetPromptRequest,
+  Model.InitializeRequest,
+  Model.ListPromptsRequest,
+  Model.ListResourcesRequest,
+  Model.ListResourceTemplatesRequest,
+  Model.ListRootsRequest,
+  Model.ListToolsRequest,
+  Model.ReadResourceRequest,
+  Model.PingRequest,
+  Model.InitializedNotification,
+  Model.CancelledNotification
+)
+
+export type ClientRequest = Schema.Schema.Type<typeof ClientRequest>
+
 export const ServerResult = Schema.Union(
   Model.CallToolResult,
   Model.CompleteResult,
@@ -141,3 +153,13 @@ export const ServerResult = Schema.Union(
 )
 
 export type ServerResult = Schema.Schema.Type<typeof ServerResult>
+
+export const ServerResponse = Schema.Union(
+  Schema.Struct({
+    ...JsonRpcError.fields,
+    result: ServerResult
+  }),
+  JsonRpcError
+)
+
+export type ServerResponse = Schema.Schema.Type<typeof ServerResponse>
