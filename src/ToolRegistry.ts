@@ -75,7 +75,7 @@ export const GetNameTool = ToolDefinition.make(
       type: "object"
     }
   }),
-  Schema.Struct({}).pipe(Schema.identifier("GetNameInput")),
+  Schema.Struct({}).annotations({ identifier: "GetNameInput" }),
   (_input) => Effect.succeed("Jonathan")
 )
 
@@ -95,7 +95,7 @@ export const EchoTool = ToolDefinition.make(
   }),
   Schema.Struct({
     message: Schema.String
-  }).pipe(Schema.identifier("EchoInput")),
+  }).annotations({ identifier: "EchoInput" }),
   (input) => Effect.succeed(input.message)
 )
 
@@ -115,7 +115,7 @@ export const CalculatorTool = ToolDefinition.make(
   }),
   Schema.Struct({
     expression: Schema.String
-  }).pipe(Schema.identifier("CalculatorInput")),
+  }).annotations({ identifier: "CalculatorInput" }),
   (input) =>
     Effect.try({
       try: () => {

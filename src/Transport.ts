@@ -44,14 +44,15 @@ export class Transport extends Effect.Service<Transport>()("Transport", {
 
     const handleToolsCall = (params: Record<string, unknown>) =>
       tools.call(params as any).pipe(
-        Effect.catchAll((error) =>
+        Effect.catchAllDefect((defect) =>
           Effect.succeed({
+            _meta: Option.none(),
             content: [{
               type: "text" as const,
-              text: error.message,
-              annotations: null
+              text: defect instanceof Error ? defect.message : String(defect),
+              annotations: Option.none()
             }],
-            isError: true
+            isError: Option.some(true)
           })
         )
       )
