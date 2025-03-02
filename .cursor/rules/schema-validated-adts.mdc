@@ -1,0 +1,380 @@
+---
+description: Schema-Validated Algebraic Data Types
+globs: src/**/*.ts
+alwaysApply: false
+---
+# Schema-Validated Algebraic Data Types
+
+Guidelines for implementing type-safe, schema-validated Algebraic Data Types (ADTs) in the MCP project using Effect's Schema system.
+
+<rule>
+name: schema_validated_adts
+description: Standards for defining and using Schema-validated Algebraic Data Types
+filters:
+  # Match TypeScript files
+  - type: file_extension
+    pattern: "\\.ts$"
+  # Match ADT-related content
+  - type: content
+    pattern: "(?i)Schema\\.|TaggedClass|Union|TypeId"
+
+actions:
+  - type: suggest
+    message: |
+      ## Schema-Validated Algebraic Data Types Guidelines
+
+      Schema-Validated ADTs combine TypeScript's type system with Effect's Schema validation to create robust, type-safe domain models with runtime validation.
+
+      ### Type ID Pattern
+
+      #### Type ID Symbol Definition
+      - Define a unique symbol as a TypeId for each ADT family
+      - Use consistent naming conventions for TypeId symbols
+      - Export both the symbol and its type
+      ```typescript
+      // Type ID for the ADT family
+      export const TypeId: unique symbol = Symbol.for("Domain/MyModel")
+      export type TypeId = typeof TypeId
+      ```
+
+      #### Type ID Implementation
+      - Include the TypeId in each class implementation
+      - Use the TypeId for runtime type checking
+      ```typescript
+      export class MyModel {
+        readonly [TypeId]: TypeId = TypeId
+        
+        // Type guard
+        static is(u: unknown): u is MyModel {
+          return Predicate.hasProperty(u, TypeId)
+        }
+      }
+      ```
+
+      ### Sum Types (Tagged Unions)
+
+      #### Tagged Class Definition
+      - Use Schema.TaggedClass for creating tagged union members
+      - Provide a unique tag string for each variant
+      - Define the structure using Schema types
+      ```typescript
+      export class Success extends Schema.TaggedClass("Domain/Result/Success")(
+        "Success", 
+        { value: Schema.Unknown }
+      ) {
+        readonly [TypeId]: TypeId = TypeId
+      }
+
+      export class Failure extends Schema.TaggedClass("Domain/Result/Failure")(
+        "Failure", 
+        { error: Schema.String }
+      ) {
+        readonly [TypeId]: TypeId = TypeId
+      }
+      ```
+
+      #### Union Type Definition
+      - Create a union type of all variants
+      - Provide a Schema.Union for runtime validation
+      ```typescript
+      // Type definition
+      export type Result<T> = Success<T> | Failure
+
+      // Schema for validation
+      export const Result: Schema.Schema<Result<unknown>> = Schema.Union(
+        Success,
+        Failure
+      )
+      ```
+
+      ### Product Types (Structures)
+
+      #### Class Definition
+      - Use Schema.Class for creating product types
+      - Define all fields with appropriate Schema types
+      - Include validation rules as needed
+      ```typescript
+      export class Person extends Schema.Class("Domain/Person")({
+        id: PersonId,
+        firstName: Schema.NonEmptyString,
+        lastName: Schema.NonEmptyString,
+        email: Email,
+        dateOfBirth: Schema.optional(Schema.Date)
+      }) {
+        readonly [TypeId]: TypeId = TypeId
+        
+        // Derived properties
+        get fullName(): string {
+          return `${this.firstName} ${this.lastName}`
+        }
+      }
+      ```
+
+      #### Branded Types
+      - Use Schema.brand for creating nominal types
+      - Chain with other Schema operations for validation
+      ```typescript
+      export const PersonId = Schema.Number.pipe(
+        Schema.positive(),
+        Schema.brand("PersonId")
+      )
+      export type PersonId = typeof PersonId.Type
+
+      export const Email = Schema.String.pipe(
+        Schema.pattern(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/),
+        Schema.brand("Email")
+      )
+      export type Email = typeof Email.Type
+      ```
+
+      ### Composition Patterns
+
+      #### Nested Structures
+      - Compose ADTs to create complex domain models
+      - Use Schema.Chunk or Schema.Array for collections
+      ```typescript
+      export class Team extends Schema.Class("Domain/Team")({
+        id: TeamId,
+        name: Schema.NonEmptyString,
+        members: Schema.Array(Person)
+      }) {
+        readonly [TypeId]: TypeId = TypeId
+      }
+      ```
+
+      #### Transformation and Validation
+      - Use Schema.transformOrFail for complex transformations
+      - Provide clear error messages for validation failures
+      ```typescript
+      export const DateFromString = Schema.transformOrFail(
+        Schema.String,
+        Schema.Date,
+        {
+          decode: (dateStr, _, ast) => {
+            const date = new Date(dateStr)
+            return isNaN(date.getTime())
+              ? ParseResult.fail(new ParseResult.Type(ast, dateStr))
+              : ParseResult.succeed(date)
+          },
+          encode: (date) => ParseResult.succeed(date.toISOString())
+        }
+      )
+      ```
+
+      ### Factory Methods
+
+      #### Smart Constructors
+      - Provide static factory methods for convenient object creation
+      - Include validation in factory methods
+      - Return Effect for operations that might fail
+      ```typescript
+      export class Document extends Schema.Class("Domain/Document")({
+        id: DocumentId,
+        content: Schema.String,
+        format: DocumentFormat
+      }) {
+        readonly [TypeId]: TypeId = TypeId
+        
+        static fromFile(
+          path: string
+        ): Effect.Effect<Document, FileError, FileSystem.FileSystem> {
+          return Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem
+            const content = yield* fs.readFileUtf8(path)
+            const format = yield* detectFormat(path)
+            return new Document({
+              id: DocumentId.make(crypto.randomUUID()),
+              content,
+              format
+            })
+          })
+        }
+      }
+      ```
+
+      #### Default Values
+      - Use Schema.withDefault or Schema.withConstructorDefault for default values
+      - Make defaults explicit and documented
+      ```typescript
+      export class Configuration extends Schema.Class("Domain/Configuration")({
+        timeout: Schema.Number.pipe(
+          Schema.positive(),
+          Schema.withConstructorDefault(() => 30000)
+        ),
+        retries: Schema.Number.pipe(
+          Schema.int(),
+          Schema.nonNegative(),
+          Schema.withConstructorDefault(() => 3)
+        )
+      }) {
+        readonly [TypeId]: TypeId = TypeId
+      }
+      ```
+
+      ### Pattern Matching
+
+      #### Match Function
+      - Create match functions for exhaustive pattern matching
+      - Use discriminated unions for type-safe matching
+      ```typescript
+      export const match = <T, R>(
+        result: Result<T>,
+        patterns: {
+          Success: (value: T) => R,
+          Failure: (error: string) => R
+        }
+      ): R => {
+        switch (result._tag) {
+          case "Success":
+            return patterns.Success(result.value)
+          case "Failure":
+            return patterns.Failure(result.error)
+        }
+      }
+      ```
+
+      #### Option Integration
+      - Use Option for representing optional values
+      - Provide helper methods for Option conversion
+      ```typescript
+      export class User extends Schema.Class("Domain/User")({
+        id: UserId,
+        name: Schema.String,
+        email: Email,
+        phoneNumber: Schema.optional(PhoneNumber)
+      }) {
+        readonly [TypeId]: TypeId = TypeId
+        
+        get phoneNumberOption(): Option.Option<PhoneNumber> {
+          return Option.fromNullable(this.phoneNumber)
+        }
+      }
+      ```
+
+      ### Serialization
+
+      #### JSON Schemas
+      - Define JSON schemas for serialization
+      - Use Schema.transform for custom serialization logic
+      ```typescript
+      export const PersonJson = Schema.transform(
+        Person,
+        Schema.Struct({
+          id: Schema.Number,
+          firstName: Schema.String,
+          lastName: Schema.String,
+          email: Schema.String,
+          dateOfBirth: Schema.optional(Schema.String)
+        }),
+        {
+          encode: (person) => ({
+            ...person,
+            dateOfBirth: person.dateOfBirth?.toISOString()
+          }),
+          decode: (json) => ({
+            ...json,
+            dateOfBirth: json.dateOfBirth ? new Date(json.dateOfBirth) : undefined
+          })
+        }
+      )
+      ```
+
+      #### Sensitive Data Handling
+      - Use Schema.Redacted for sensitive information
+      - Implement proper toString/toJSON methods
+      ```typescript
+      export const Password = Schema.Redacted(Schema.String)
+      export type Password = typeof Password.Type
+
+      export class Credentials extends Schema.Class("Domain/Credentials")({
+        username: Schema.String,
+        password: Password
+      }) {
+        readonly [TypeId]: TypeId = TypeId
+        
+        toJSON(): unknown {
+          return {
+            username: this.username,
+            password: "[REDACTED]"
+          }
+        }
+      }
+      ```
+
+examples:
+  - input: |
+      // Type ID definition
+      export const TypeId: unique symbol = Symbol.for("Domain/Person")
+      export type TypeId = typeof TypeId
+
+      // Branded types
+      export const PersonId = Schema.Number.pipe(Schema.brand("PersonId"))
+      export type PersonId = typeof PersonId.Type
+
+      export const Email = Schema.String.pipe(
+        Schema.pattern(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/),
+        Schema.brand("Email")
+      )
+      export type Email = typeof Email.Type
+
+      // Product type
+      export class Person extends Schema.Class("Domain/Person")({
+        id: PersonId,
+        firstName: Schema.NonEmptyString,
+        lastName: Schema.NonEmptyString,
+        email: Email,
+        dateOfBirth: Schema.optional(Schema.Date)
+      }) {
+        readonly [TypeId]: TypeId = TypeId
+        
+        get fullName(): string {
+          return `${this.firstName} ${this.lastName}`
+        }
+        
+        static fromJson(json: unknown): Effect.Effect<Person, ParseError> {
+          return Schema.parse(Person)(json)
+        }
+      }
+    output: "Follows schema-validated ADT pattern"
+
+  - input: |
+      // Sum type (tagged union)
+      export const TypeId: unique symbol = Symbol.for("Domain/Result")
+      export type TypeId = typeof TypeId
+
+      export class Success<T> extends Schema.TaggedClass("Domain/Result/Success")(
+        "Success", 
+        { value: Schema.Unknown }
+      ) {
+        readonly [TypeId]: TypeId = TypeId
+      }
+
+      export class Failure extends Schema.TaggedClass("Domain/Result/Failure")(
+        "Failure", 
+        { error: Schema.String }
+      ) {
+        readonly [TypeId]: TypeId = TypeId
+      }
+
+      export type Result<T> = Success<T> | Failure
+      
+      export const match = <T, R>(
+        result: Result<T>,
+        patterns: {
+          Success: (value: T) => R,
+          Failure: (error: string) => R
+        }
+      ): R => {
+        switch (result._tag) {
+          case "Success":
+            return patterns.Success(result.value)
+          case "Failure":
+            return patterns.Failure(result.error)
+        }
+      }
+    output: "Follows schema-validated ADT pattern for tagged unions"
+
+metadata:
+  priority: high
+  version: 1.0
+</rule> 

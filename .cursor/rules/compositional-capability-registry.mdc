@@ -1,0 +1,364 @@
+---
+description: Compositional Capability Registry Pattern
+globs: src/**/*.ts
+alwaysApply: false
+---
+# Compositional Capability Registry Pattern
+
+Guidelines for implementing Compositional Capability Registries, Service Aggregators, Contextual Toolkits, and Effect Registries in the MCP project.
+
+<rule>
+name: compositional_capability_registry
+description: Standards for implementing composable registries of capabilities using Effect's Context system
+filters:
+  # Match TypeScript files
+  - type: file_extension
+    pattern: "\\.ts$"
+  # Match registry-related content
+  - type: content
+    pattern: "(?i)Registry|Toolkit|Container|Provider|Capabilities"
+
+actions:
+  - type: suggest
+    message: |
+      ## Compositional Capability Registry Guidelines
+
+      A Compositional Capability Registry is a higher-order pattern that combines a collection of capabilities with functional composition principles, creating a flexible, type-safe container that integrates with Effect's Context system.
+
+      ### Core Structure
+
+      #### Type ID and Interface Definition
+      - Define a unique TypeId symbol for your registry
+      - Create an interface that extends the registry's capabilities
+      - Include methods for composition and capability management
+      ```typescript
+      // Type ID for the registry
+      export const TypeId: unique symbol = Symbol.for("@effect/ai/AiToolkit")
+      export type TypeId = typeof TypeId
+
+      // Main interface
+      export interface AiToolkit extends Effect.Effect<Handlers, never, Tool.Services | Registry>, 
+        Inspectable.Inspectable {
+        readonly [TypeId]: TypeId
+        readonly tools: HashMap.HashMap<string, Tool>
+        readonly add: (tool: Tool) => AiToolkit
+        readonly addAll: (...tools: Tool[]) => AiToolkit
+        readonly concat: (that: AiToolkit) => AiToolkit
+        readonly implement: <R, E = never>(
+          f: (handlers: Handlers) => Handlers | Effect.Effect<Handlers, E, R>
+        ) => Layer.Layer<Tool.ServiceFromTag, E, R>
+      }
+      ```
+
+      #### Implementation Class
+      - Create an implementation class that extends Effectable.Class
+      - Implement all interface methods with immutable operations
+      - Provide proper inspection methods for debugging
+      ```typescript
+      class AiToolkitImpl extends Effectable.Class<Handlers, never, Tool.Services | Registry>
+        implements AiToolkit {
+        readonly [TypeId]: TypeId
+
+        constructor(readonly tools: HashMap.HashMap<string, Tool>) {
+          super()
+          this[TypeId] = TypeId
+        }
+
+        toJSON(): unknown {
+          return {
+            _id: "@effect/ai/AiToolkit",
+            tools: [...HashMap.values(this.tools)].map((tool) => tool._tag)
+          }
+        }
+
+        toString(): string {
+          return Inspectable.format(this)
+        }
+
+        [Inspectable.NodeInspectSymbol](): string {
+          return Inspectable.format(this)
+        }
+
+        add(tool: Tool): AiToolkit {
+          return new AiToolkitImpl(HashMap.set(this.tools, tool._tag, tool))
+        }
+
+        addAll(...tools: Tool[]): AiToolkit {
+          let map = this.tools
+          for (const tool of tools) {
+            map = HashMap.set(map, tool._tag, tool)
+          }
+          return new AiToolkitImpl(map)
+        }
+
+        concat(that: AiToolkit): AiToolkit {
+          return new AiToolkitImpl(HashMap.union(this.tools, that.tools))
+        }
+
+        implement<R, E = never>(
+          f: (handlers: Handlers) => Handlers | Effect.Effect<Handlers, E, R>
+        ): Layer.Layer<Tool.ServiceFromTag | Registry, E, R> {
+          return registerHandlers(this, f).pipe(
+            Layer.scopedDiscard,
+            Layer.provideMerge(Registry.Live)
+          )
+        }
+      }
+      ```
+
+      ### Capability Definition
+
+      #### Tool/Capability Interface
+      - Define a clear interface for tools/capabilities
+      - Include a tag for identification and type information
+      - Use Schema for input/output validation
+      ```typescript
+      export namespace Tool {
+        export interface AnySchema {
+          readonly [Schema.TypeId]: any
+          readonly _tag: string
+          readonly Type: Schema.SerializableWithResult.All
+          readonly success: Schema.Schema.Any
+        }
+
+        export type Success<T extends AnySchema> = Schema.WithResult.Success<T["Type"]>
+        export type Failure<T extends AnySchema> = Schema.WithResult.Failure<T["Type"]>
+        export type Context<T extends AnySchema> = Schema.WithResult.Context<T["Type"]>
+
+        export type Handler<T extends AnySchema, R = never> = 
+          (params: T["Type"]) => Effect.Effect<Success<T>, Failure<T>, R>
+      }
+      ```
+
+      ### Handler Management
+
+      #### Handlers Interface
+      - Define a handlers interface for implementing capabilities
+      - Include methods to register handlers for specific capabilities
+      - Use type variance to track remaining unimplemented handlers
+      ```typescript
+      export interface Handlers<T = any, R = never> {
+        readonly [HandlersTypeId]: Handlers.Variance
+        readonly toolkit: AiToolkit
+        readonly handlers: HashMap.HashMap<string, Tool.Handler<any, R>>
+        readonly handle: <Tag extends string, RH = never>(
+          tag: Tag,
+          f: Tool.Handler<ExtractTag<T, Tag>, RH>
+        ) => Handlers<ExcludeTag<T, Tag>, R | RH>
+      }
+
+      export namespace Handlers {
+        export interface Variance {
+          readonly _Tools: Types.Invariant
+        }
+      }
+      ```
+
+      #### Handlers Implementation
+      - Implement handlers with proper type safety
+      - Maintain immutability in handler registration
+      ```typescript
+      class HandlersImpl<T, R> implements Handlers<T, R> {
+        readonly [HandlersTypeId]: Handlers.Variance
+
+        constructor(
+          readonly toolkit: AiToolkit,
+          readonly handlers: HashMap.HashMap<string, Tool.Handler<any, R>>
+        ) {
+          this[HandlersTypeId] = handlersVariance
+        }
+
+        static fromToolkit(toolkit: AiToolkit): Handlers {
+          return new HandlersImpl(toolkit, HashMap.empty())
+        }
+
+        handle<Tag extends string, RH = never>(
+          tag: Tag,
+          f: Tool.Handler<ExtractTag<T, Tag>, RH>
+        ): Handlers<ExcludeTag<T, Tag>, R | RH> {
+          return new HandlersImpl(
+            this.toolkit,
+            HashMap.set(this.handlers, tag, f as any)
+          )
+        }
+      }
+      ```
+
+      ### Registry Integration
+
+      #### Registry Tag
+      - Create a Context.Tag for the registry
+      - Provide a Live layer for dependency injection
+      ```typescript
+      export class Registry extends Context.Tag("@effect/ai/AiToolkit/Registry")<
+        Registry,
+        Map<Tool.AnySchema, Tool.HandlerAny>
+      >() {
+        static readonly Live = Layer.sync(Registry, () => new Map())
+      }
+      ```
+
+      #### Handler Registration
+      - Implement a function to register handlers with the registry
+      - Handle proper context management and error handling
+      ```typescript
+      const registerHandlers = (
+        toolkit: AiToolkit,
+        f: (handlers: Handlers) => Handlers | Effect.Effect<Handlers>
+      ) => Effect.context().pipe(
+        Effect.bindTo("context"),
+        Effect.bind("handlers", () => {
+          const handlers = f(HandlersImpl.fromToolkit(toolkit))
+          return Effect.isEffect(handlers) ? handlers : Effect.succeed(handlers)
+        }),
+        Effect.tap(({ context, handlers }) => {
+          const registry = Context.unsafeGet(context, Registry)
+          for (const [tag, handler] of handlers.handlers) {
+            const tool = HashMap.unsafeGet(handlers.toolkit.tools, tag)
+            registry.set(tool, function(params: any) {
+              return Effect.withSpan(
+                Effect.mapInputContext(handler(params), (input) => 
+                  Context.merge(input, context)
+                ),
+                "AiToolkit.handler",
+                {
+                  captureStackTrace: false,
+                  attributes: { tool: tag, parameters: params }
+                }
+              )
+            })
+          }
+        })
+      )
+      ```
+
+      ### Usage Pattern
+
+      #### Registry Creation
+      - Start with an empty registry and build it up
+      - Group related capabilities together
+      ```typescript
+      // Create an empty registry
+      export const empty: AiToolkit = new AiToolkitImpl(HashMap.empty())
+
+      // Build up a domain-specific toolkit
+      export const myDomainTools = empty
+        .add(tool1)
+        .add(tool2)
+        .addAll(tool3, tool4)
+      ```
+
+      #### Implementation
+      - Implement handlers for capabilities
+      - Create a Layer for dependency injection
+      ```typescript
+      export const MyDomainToolsLive = myDomainTools.implement(
+        (handlers) => handlers
+          .handle("tool1", (params) => Effect.succeed(/* ... */))
+          .handle("tool2", (params) => Effect.succeed(/* ... */))
+      )
+      ```
+
+      #### Composition
+      - Compose multiple registries together
+      - Combine their implementations
+      ```typescript
+      // Compose registries
+      const allTools = myDomainTools.concat(otherDomainTools)
+
+      // Compose implementations
+      const AllToolsLive = Layer.merge(
+        MyDomainToolsLive,
+        OtherDomainToolsLive
+      )
+      ```
+
+examples:
+  - input: |
+      // Type ID and interface
+      export const TypeId = Symbol.for("Domain/ToolRegistry")
+      export type TypeId = typeof TypeId
+
+      export interface ToolRegistry extends Effect.Effect<Handlers, never, Tool.Services | Registry>,
+        Inspectable.Inspectable {
+        readonly [TypeId]: TypeId
+        readonly tools: HashMap.HashMap<string, Tool>
+        readonly add: (tool: Tool) => ToolRegistry
+        readonly addAll: (...tools: Tool[]) => ToolRegistry
+        readonly concat: (that: ToolRegistry) => ToolRegistry
+        readonly implement: <R, E = never>(
+          f: (handlers: Handlers) => Handlers | Effect.Effect<Handlers, E, R>
+        ) => Layer.Layer<Tool.ServiceFromTag, E, R>
+      }
+
+      // Implementation
+      class ToolRegistryImpl extends Effectable.Class<Handlers, never, Tool.Services | Registry>
+        implements ToolRegistry {
+        readonly [TypeId]: TypeId
+
+        constructor(readonly tools: HashMap.HashMap<string, Tool>) {
+          super()
+          this[TypeId] = TypeId
+        }
+
+        add(tool: Tool): ToolRegistry {
+          return new ToolRegistryImpl(HashMap.set(this.tools, tool._tag, tool))
+        }
+
+        addAll(...tools: Tool[]): ToolRegistry {
+          let map = this.tools
+          for (const tool of tools) {
+            map = HashMap.set(map, tool._tag, tool)
+          }
+          return new ToolRegistryImpl(map)
+        }
+
+        concat(that: ToolRegistry): ToolRegistry {
+          return new ToolRegistryImpl(HashMap.union(this.tools, that.tools))
+        }
+
+        implement<R, E = never>(
+          f: (handlers: Handlers) => Handlers | Effect.Effect<Handlers, E, R>
+        ): Layer.Layer<Tool.ServiceFromTag | Registry, E, R> {
+          return registerHandlers(this, f).pipe(
+            Layer.scopedDiscard,
+            Layer.provideMerge(Registry.Live)
+          )
+        }
+      }
+
+      // Empty registry
+      export const empty: ToolRegistry = new ToolRegistryImpl(HashMap.empty())
+    output: "Follows compositional capability registry pattern"
+
+  - input: |
+      // Registry with implementation
+      export class Registry extends Context.Tag("Domain/ToolRegistry/Registry")<
+        Registry,
+        Map<Tool.AnySchema, Tool.HandlerAny>
+      >() {
+        static readonly Live = Layer.sync(Registry, () => new Map())
+      }
+
+      // Handlers interface
+      export interface Handlers<T = any, R = never> {
+        readonly toolkit: ToolRegistry
+        readonly handlers: HashMap.HashMap<string, Tool.Handler<any, R>>
+        readonly handle: <Tag extends string, RH = never>(
+          tag: Tag,
+          f: Tool.Handler<ExtractTag<T, Tag>, RH>
+        ) => Handlers<ExcludeTag<T, Tag>, R | RH>
+      }
+
+      // Implementation layer
+      export const ToolsLive = toolRegistry.implement(
+        (handlers) => handlers
+          .handle("tool1", (params) => Effect.succeed(/* ... */))
+          .handle("tool2", (params) => Effect.succeed(/* ... */))
+      )
+    output: "Follows compositional capability registry pattern for implementation"
+
+metadata:
+  priority: high
+  version: 1.0
+</rule> 

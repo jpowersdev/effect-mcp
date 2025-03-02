@@ -1,0 +1,123 @@
+---
+description: Feature Development Workflow
+globs: src/**/*.ts
+alwaysApply: false
+---
+# Feature Development Workflow
+
+Guidelines for the process of adding new features to the MCP project.
+
+<rule>
+name: feature_workflow
+description: Standard workflow for feature development from requirements to implementation and testing
+filters:
+  # Match TypeScript files
+  - type: file_extension
+    pattern: "\\.ts$"
+  # Match feature-related discussions
+  - type: content
+    pattern: "(?i)feature|implement|add.*functionality"
+
+actions:
+  - type: suggest
+    message: |
+      ## Feature Development Workflow
+
+      Follow this structured workflow when adding new features to ensure quality, maintainability, and proper documentation.
+
+      ### 1. Requirements Gathering
+
+      - Begin with a discussion of requirements
+      - Use numbered bullet points and sub-bullets for clear referencing
+      - Iterate through several rounds of discussion to refine requirements
+      - Example format:
+        ```
+        1. User Authentication
+           1.1. Support OAuth2 login with Google and GitHub
+           1.2. Implement session management
+              1.2.1. Sessions expire after 24 hours
+              1.2.2. Allow manual logout
+           1.3. Store user preferences
+        ```
+
+      ### 2. Requirements Documentation
+
+      - Persist finalized requirements to a file
+      - Save in `docs/features/{feature-name}.md`
+      - Include:
+        - Feature overview
+        - Numbered requirements list
+        - Acceptance criteria
+        - Any design decisions or constraints
+      - This documentation will serve as:
+        - Reference during implementation
+        - Source for changelog entries
+        - Context for future maintenance
+
+      ### 3. Implementation Preparation
+
+      - Load and inspect relevant files before modification
+      - Describe the current structure and functionality
+      - Make explicit any assumptions about the code
+      - Ask for clarification if the purpose of any component is unclear
+
+      ### 4. Implementation
+
+      - Implement the feature according to requirements
+      - Follow the project's code style guidelines
+      - Add appropriate comments and documentation
+      - Break complex features into smaller, manageable parts
+      - Commit work-in-progress changes with `chore:` prefix if needed
+
+      ### 5. Testing
+
+      - Implement tests for the new feature
+        - Unit tests for individual components
+        - Integration tests for component interactions
+        - End-to-end tests if applicable
+      - Update existing tests that may be affected
+      - Ensure test coverage meets project standards
+      - Document test cases with clear descriptions
+
+      ### 6. Verification
+
+      - Run build commands to verify compilation
+        ```
+        npm run build
+        ```
+      - Run test suite to verify functionality
+        ```
+        npm test
+        ```
+      - Fix any issues that arise during verification
+      - Document any edge cases or limitations discovered
+
+      ### 7. Completion
+
+      - On confirmation from the user, create a commit using conventional commit syntax
+        ```
+        feat(component): add new feature
+        
+        Implements requirements 1.1-1.3 for user authentication
+        
+        Closes #123
+        ```
+      - Reference the requirements by their identifiers
+      - Link to any relevant issues or discussions
+
+examples:
+  - input: |
+      // Feature implementation discussion
+      // Requirements:
+      // 1. Add GitHub integration
+      //    1.1. Support repository listing
+      //    1.2. Support issue tracking
+      // 2. Implement authentication
+      //    2.1. Use OAuth tokens
+      //    2.2. Support token refresh
+    output: "Feature development workflow should be followed"
+
+metadata:
+  priority: high
+  version: 1.0
+</rule> 

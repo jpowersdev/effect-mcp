@@ -1,3 +1,4 @@
+import type { ParseResult } from "effect"
 import { Effect, Option, Schema } from "effect"
 import type * as Model from "./Generated.js"
 import { Prompt, PromptArgument, PromptMessage, TextContent } from "./Generated.js"
@@ -14,7 +15,7 @@ export class PromptValidationError extends Schema.TaggedError<PromptValidationEr
 }) {}
 
 // Define a type for prompt definitions with validation schema
-export class PromptDefinition<I, O> {
+export class PromptDefinition<I, O extends ReadonlyArray<PromptMessage> = ReadonlyArray<PromptMessage>> {
   constructor(
     readonly metadata: Prompt,
     readonly requestSchema: Schema.Schema<I, any>,
@@ -22,7 +23,7 @@ export class PromptDefinition<I, O> {
   ) {}
 
   // Helper to create a prompt definition
-  static make<I, O>(
+  static make<I, O extends ReadonlyArray<PromptMessage>>(
     metadata: Prompt,
     requestSchema: Schema.Schema<I, any>,
     handler: (input: I) => Effect.Effect<O, PromptValidationError>
@@ -31,7 +32,10 @@ export class PromptDefinition<I, O> {
   }
 
   // Process a request with this prompt definition
-  process(args: Record<string, string> | undefined) {
+  process(args: Record<string, string> | undefined): Effect.Effect<
+    O,
+    PromptValidationError | ParseResult.ParseError
+  > {
     return Schema.decodeUnknown(this.requestSchema)(args || {}).pipe(
       Effect.andThen((input) => this.handler(input))
     )
@@ -40,9 +44,9 @@ export class PromptDefinition<I, O> {
 
 // Registry to simplify prompt registration and retrieval
 export class PromptRegistry {
-  private prompts = new Map<string, PromptDefinition<any, any>>()
+  private prompts = new Map<string, PromptDefinition<any>>()
 
-  register<I, O>(definition: PromptDefinition<I, O>) {
+  register<I, O extends ReadonlyArray<PromptMessage>>(definition: PromptDefinition<I, O>) {
     this.prompts.set(definition.metadata.name, definition)
     return this
   }
@@ -76,18 +80,16 @@ export const ChatPrompt = PromptDefinition.make(
   }),
   // Handler
   (input) =>
-    Effect.succeed({
-      messages: [
-        PromptMessage.make({
-          role: "user",
-          content: TextContent.make({
-            annotations: Option.none(),
-            text: `Let's talk about ${input.topic}.`,
-            type: "text"
-          })
+    Effect.succeed([
+      PromptMessage.make({
+        role: "user",
+        content: TextContent.make({
+          annotations: Option.none(),
+          text: `Let's talk about ${input.topic}.`,
+          type: "text"
         })
-      ]
-    })
+      })
+    ])
 )
 
 export const CodeGenerationPrompt = PromptDefinition.make(
@@ -127,19 +129,17 @@ export const CodeGenerationPrompt = PromptDefinition.make(
   }),
   // Handler
   (input) =>
-    Effect.succeed({
-      messages: [
-        PromptMessage.make({
-          role: "user",
-          content: TextContent.make({
-            annotations: Option.none(),
-            text: `Write ${input.language} code that does the following: ${input.description}` +
-              (input.complexity ? `\nComplexity level: ${input.complexity}` : ""),
-            type: "text"
-          })
+    Effect.succeed([
+      PromptMessage.make({
+        role: "user",
+        content: TextContent.make({
+          annotations: Option.none(),
+          text: `Write ${input.language} code that does the following: ${input.description}` +
+            (input.complexity ? `\nComplexity level: ${input.complexity}` : ""),
+          type: "text"
         })
-      ]
-    })
+      })
+    ])
 )
 
 export const SummarizePrompt = PromptDefinition.make(
@@ -173,20 +173,18 @@ export const SummarizePrompt = PromptDefinition.make(
   }),
   // Handler
   (input) =>
-    Effect.succeed({
-      messages: [
-        PromptMessage.make({
-          role: "user",
-          content: TextContent.make({
-            annotations: Option.none(),
-            text: `Please summarize the following text:` +
-              (input.length ? `\nSummary length: ${input.length}` : "") +
-              `\n\n${input.text}`,
-            type: "text"
-          })
+    Effect.succeed([
+      PromptMessage.make({
+        role: "user",
+        content: TextContent.make({
+          annotations: Option.none(),
+          text: `Please summarize the following text:` +
+            (input.length ? `\nSummary length: ${input.length}` : "") +
+            `\n\n${input.text}`,
+          type: "text"
         })
-      ]
-    })
+      })
+    ])
 )
 
 export const DocumentationPrompt = PromptDefinition.make(
@@ -216,20 +214,18 @@ export const DocumentationPrompt = PromptDefinition.make(
   }),
   // Handler
   (input) =>
-    Effect.succeed({
-      messages: [
-        PromptMessage.make({
-          role: "user",
-          content: TextContent.make({
-            annotations: Option.none(),
-            text: `Please generate documentation for this code` +
-              (input.format ? ` using ${input.format} format` : "") +
-              `:\n\n\`\`\`\n${input.code}\n\`\`\``,
-            type: "text"
-          })
+    Effect.succeed([
+      PromptMessage.make({
+        role: "user",
+        content: TextContent.make({
+          annotations: Option.none(),
+          text: `Please generate documentation for this code` +
+            (input.format ? ` using ${input.format} format` : "") +
+            `:\n\n\`\`\`\n${input.code}\n\`\`\``,
+          type: "text"
         })
-      ]
-    })
+      })
+    ])
 )
 
 export const EffectCodePrompt = PromptDefinition.make(
@@ -275,37 +271,35 @@ export const EffectCodePrompt = PromptDefinition.make(
   }),
   // Handler
   (input) =>
-    Effect.succeed({
-      messages: [
-        PromptMessage.make({
-          role: "user",
-          content: TextContent.make({
-            annotations: Option.none(),
-            text: `Generate TypeScript code using the Effect library for the following task:\n\n` +
-              `Task description: ${input.taskDescription}\n\n` +
-              (input.complexity ? `Complexity level: ${input.complexity}\n` : "") +
-              `Requirements:\n` +
-              `- Use Effect.gen for handling async operations\n` +
-              `- Implement proper error handling with custom error types\n` +
-              `- Follow functional programming principles\n` +
-              `- Use appropriate Effect data types (Option, Either, etc.)\n` +
-              (input.includeTests ? `- Include comprehensive tests for the implementation\n` : "") +
-              (input.includeComments ? `- Include detailed comments explaining the code\n` : "") +
-              `- Ensure the code is type-safe and well-structured`,
-            type: "text"
-          })
-        }),
-        PromptMessage.make({
-          role: "assistant",
-          content: TextContent.make({
-            annotations: Option.none(),
-            text:
-              "I'll create a TypeScript implementation using the Effect library for your task. Let me break this down and structure a solution that follows functional programming principles.",
-            type: "text"
-          })
+    Effect.succeed([
+      PromptMessage.make({
+        role: "user",
+        content: TextContent.make({
+          annotations: Option.none(),
+          text: `Generate TypeScript code using the Effect library for the following task:\n\n` +
+            `Task description: ${input.taskDescription}\n\n` +
+            (input.complexity ? `Complexity level: ${input.complexity}\n` : "") +
+            `Requirements:\n` +
+            `- Use Effect.gen for handling async operations\n` +
+            `- Implement proper error handling with custom error types\n` +
+            `- Follow functional programming principles\n` +
+            `- Use appropriate Effect data types (Option, Either, etc.)\n` +
+            (input.includeTests ? `- Include comprehensive tests for the implementation\n` : "") +
+            (input.includeComments ? `- Include detailed comments explaining the code\n` : "") +
+            `- Ensure the code is type-safe and well-structured`,
+          type: "text"
         })
-      ]
-    })
+      }),
+      PromptMessage.make({
+        role: "assistant",
+        content: TextContent.make({
+          annotations: Option.none(),
+          text:
+            "I'll create a TypeScript implementation using the Effect library for your task. Let me break this down and structure a solution that follows functional programming principles.",
+          type: "text"
+        })
+      })
+    ])
 )
 
 export class PromptProvider extends Effect.Service<PromptProvider>()("PromptProvider", {
@@ -315,7 +309,7 @@ export class PromptProvider extends Effect.Service<PromptProvider>()("PromptProv
     const registry = new PromptRegistry()
 
     // Method to register new prompts at runtime
-    const registerPrompt = <I, O>(definition: PromptDefinition<I, O>) => {
+    const registerPrompt = <I, O extends ReadonlyArray<PromptMessage>>(definition: PromptDefinition<I, O>) => {
       registry.register(definition)
       return Effect.succeed(true)
     }
@@ -339,7 +333,10 @@ export class PromptProvider extends Effect.Service<PromptProvider>()("PromptProv
     const list = Effect.succeed(registry.list())
 
     // Get and process a specific prompt
-    const get = (request: Model.GetPromptRequest) =>
+    const get = (request: Model.GetPromptRequest): Effect.Effect<{
+      prompt: Prompt
+      messages: ReadonlyArray<PromptMessage>
+    }, PromptNotFoundError | PromptValidationError> =>
       Effect.gen(function*() {
         const name = request.params.name
         const promptDef = registry.get(name)
@@ -355,13 +352,13 @@ export class PromptProvider extends Effect.Service<PromptProvider>()("PromptProv
         const args = Option.getOrUndefined(request.params.arguments)
 
         // Process the prompt with the provided arguments
-        const result = yield* promptDef.process(args)
+        const messages = yield* promptDef.process(args)
 
         // Return result with the prompt metadata
         return {
           prompt: promptDef.metadata,
-          messages: result.messages
-        }
+          messages
+        } as const
       }).pipe(
         Effect.mapError((cause) => {
           if (cause instanceof PromptValidationError) {

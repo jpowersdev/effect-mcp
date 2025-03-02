@@ -1,9 +1,9 @@
-import { Duration, Effect, Mailbox, Option, Predicate, Queue, RcMap, Schedule, Schema, Stream, Struct } from "effect"
-import type { JsonRpcRequest } from "./Domain/JsonRpc.js"
-import { JsonRpcError, JsonRpcNotification, JsonRpcResponse } from "./Domain/JsonRpc.js"
-import type { SessionId } from "./Domain/Session.js"
-import { SessionManager } from "./SessionManager.js"
-import { Transport } from "./Transport.js"
+import { Duration, Effect, Mailbox, Option, Queue, RcMap, Schedule, Schema, Stream, Struct } from "effect"
+import type { JsonRpcRequest } from "./JsonRpc.js"
+import { JsonRpcNotification, JsonRpcResponse } from "./JsonRpc.js"
+import { McpProtocolAdapter } from "./McpProtocolAdapter.js"
+import type { SessionId } from "./SessionManager.js"
+import { CurrentSession, SessionManager } from "./SessionManager.js"
 
 export interface Message {
   readonly sessionId: SessionId
@@ -16,24 +16,16 @@ export const messageAnnotations = (message: Message) => {
     "mcp.method": message.payload.method
   }
 
-  if (Predicate.hasProperty(message.payload, "id")) {
-    if (Option.isOption(message.payload.id)) {
-      if (Option.isSome(message.payload.id)) {
-        Object.assign(annotations, {
-          "mcp.id": message.payload.id.value
-        })
-      }
-    }
+  if (message.payload.id) {
+    Object.assign(annotations, {
+      "mcp.id": message.payload.id
+    })
   }
 
-  if (Predicate.hasProperty(message.payload, "params")) {
-    if (Option.isOption(message.payload.params)) {
-      if (Option.isSome(message.payload.params)) {
-        Object.assign(annotations, {
-          "mcp.params": message.payload.params.value
-        })
-      }
-    }
+  if (message.payload.params) {
+    Object.assign(annotations, {
+      "mcp.params": message.payload.params
+    })
   }
 
   return annotations
@@ -45,10 +37,10 @@ export class MessageBrokerError extends Schema.TaggedError<MessageBrokerError>()
 }) {}
 
 export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroker", {
-  dependencies: [SessionManager.Default, Transport.Default],
+  dependencies: [SessionManager.Default, McpProtocolAdapter.Default],
   scoped: Effect.gen(function*() {
     const sessions = yield* SessionManager
-    const transport = yield* Transport
+    const protocolAdapter = yield* McpProtocolAdapter
     const queue = yield* Queue.bounded<Message>(100)
 
     // Create a map of session-specific mailboxes
@@ -61,45 +53,40 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
 
     // Start processing pipeline
     yield* Stream.fromQueue(queue).pipe(
+      Stream.tap(() => Effect.log(`Received message`)),
       Stream.mapEffect(({ payload, sessionId }) =>
-        Effect.log(`Processing ${payload.method}`).pipe(
-          Effect.andThen(() => transport.handle(sessionId, payload)),
-          Effect.tapErrorCause(Effect.logError),
-          Effect.catchAllCause((cause) =>
-            Effect.logError(cause).pipe(
-              Effect.map(() =>
-                JsonRpcError.make({
-                  jsonrpc: "2.0",
-                  id: Option.fromNullable(payload.id),
-                  error: {
-                    data: Option.none(),
-                    code: -32000,
-                    message: "Internal server error"
-                  }
-                })
-              )
-            )
-          ),
-          Effect.tap((response) =>
-            Effect.gen(function*() {
-              if (Predicate.isNullable(response)) {
-                return
-              }
+        Effect.gen(function*() {
+          // Get the session
+          const session = yield* sessions.findById(sessionId)
 
-              const session = yield* sessions.findById(sessionId)
-              const mailbox = yield* RcMap.get(mailboxes, session.id)
-              return yield* mailbox.offer(response)
-            })
-          ),
-          Effect.annotateLogs(messageAnnotations({ payload, sessionId })),
-          Effect.whenEffect(
-            Effect.map(
-              sessions.findById(sessionId),
-              (session) =>
-                ["initialize", "notifications/initialized"].includes(payload.method) ||
-                session.activatedAt._tag === "Some"
-            )
+          // Skip processing for non-activated sessions except for initialize and notifications/initialized
+          const shouldProcess = ["initialize", "notifications/initialized"].includes(payload.method) ||
+            session.activatedAt._tag === "Some"
+
+          if (!shouldProcess) {
+            yield* Effect.log(`Skipping ${payload.method} for inactive session`)
+            return
+          }
+
+          // Process the request using McpProtocolAdapter
+          yield* protocolAdapter.processRequest(session, payload).pipe(
+            Effect.flatMap(Option.match({
+              onNone: () => Effect.void,
+              onSome: (response) =>
+                RcMap.get(mailboxes, session.id).pipe(
+                  Effect.flatMap((mailbox) => mailbox.offer(response))
+                )
+            }))
           )
+        }).pipe(
+          Effect.annotateLogs(messageAnnotations({ payload, sessionId })),
+          Effect.withSpan("MessageBroker.processMessage", {
+            attributes: {
+              sessionId,
+              method: payload.method,
+              id: payload.id
+            }
+          })
         )
       ),
       Stream.runDrain,
@@ -109,8 +96,6 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
     // Stream messages for a specific session
     const messages = (sessionId: SessionId) =>
       Effect.gen(function*() {
-        // Verify session exists
-        yield* sessions.findById(sessionId)
         // Get or create mailbox for session
         const mailbox = yield* RcMap.get(mailboxes, sessionId)
 
@@ -122,40 +107,34 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
 
         // Create recurring ping stream every 30 seconds
         const ping = Stream.fromSchedule(Schedule.spaced("30 seconds")).pipe(
-          Stream.map(() => {
-            const payload = JsonRpcNotification.make({
-              jsonrpc: "2.0",
-              method: "ping",
-              params: Option.none()
-            })
-
-            return `event: message\ndata: ${JSON.stringify(payload)}\n\n`
-          }),
-          Stream.withSpan("MessageBroker.ping", {
-            attributes: { sessionId }
-          })
+          Stream.map(() => JsonRpcNotification.make({ method: "ping" })),
+          Stream.mapEffect((_) => Schema.encodeUnknown(Schema.parseJson(JsonRpcNotification))(_)),
+          Stream.map((payload) => `event: message\ndata: ${payload}\n\n`)
         )
 
-        const messages = Mailbox.toStream(mailbox).pipe(
+        // Stream of messages from the mailbox
+        const messageStream = Mailbox.toStream(mailbox).pipe(
+          Stream.map((_) => Struct.omit(_ as any, "_tag")),
+          Stream.mapEffect((response) => Schema.encodeUnknown(Schema.parseJson(JsonRpcResponse))(response)),
           Stream.tap((response) =>
-            Effect.log("OUTGOING").pipe(
+            Effect.log("sending response").pipe(
               Effect.annotateLogs({ response })
             )
           ),
-          Stream.map((_) => Struct.omit(_ as any, "_tag")),
-          Stream.mapEffect((response) => Schema.encodeUnknown(Schema.parseJson(JsonRpcResponse))(response)),
           Stream.map((response) => `event: message\ndata: ${response}\n\n`)
         )
 
         return greeting.pipe(
           Stream.merge(ping),
-          Stream.merge(messages),
+          Stream.merge(messageStream),
           Stream.onDone(() => Effect.succeed("event:done\ndata:finished\n\n")),
           Stream.withSpan("MessageBroker.messages", {
             attributes: { sessionId }
           })
         )
-      })
+      }).pipe(
+        Effect.provideServiceEffect(CurrentSession, sessions.findById(sessionId))
+      )
 
     // Offer a new message to processing
     const offer = (message: Message) =>

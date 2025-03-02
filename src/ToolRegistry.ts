@@ -1,6 +1,84 @@
-import { Effect, Option, Schema } from "effect"
-import { Tool, ToolError } from "./Domain/Tool.js"
-import { CallToolResult, TextContent } from "./Generated.js"
+import { Effect, Either, JSONSchema, Option, Schema, SchemaAST } from "effect"
+import type { EmbeddedResource, ImageContent } from "./Generated.js"
+import { TextContent } from "./Generated.js"
+
+// TypeId for domain models
+export const TypeId: unique symbol = Symbol.for("Domain/Tool")
+export type TypeId = typeof TypeId
+
+// Schema definitions
+export class ToolSchema extends Schema.Class<ToolSchema>("Domain/ToolSchema")({
+  properties: Schema.optionalWith(Schema.Record({ key: Schema.String, value: Schema.Object }), {
+    as: "Option",
+    exact: true
+  }),
+  required: Schema.optionalWith(Schema.Array(Schema.String).pipe(Schema.mutable), {
+    as: "Option",
+    exact: true
+  }),
+  type: Schema.Literal("object")
+}, {
+  description: "The JSON schema for the tool's input"
+}) {
+  static fromSchema = <S extends Schema.Schema.AnyNoContext>(schema: S) => {
+    const jsonSchema = JSONSchema.make(schema)
+    const name = SchemaAST.getJSONIdentifier(
+      Schema.typeSchema(schema).ast
+    ).pipe(Option.getOrElse(() => ""))
+
+    const inputSchema = jsonSchema.$defs?.[name]
+    if (!inputSchema) {
+      throw new ToolError({
+        message: `No input schema found for tool ${name}`
+      })
+    }
+
+    return makeToolSchema({
+      properties: (inputSchema as any).properties,
+      required: (inputSchema as any).required
+    })
+  }
+}
+
+export const makeToolSchema = (params: {
+  properties?: Record<string, object>
+  required?: Array<string>
+}): ToolSchema =>
+  ToolSchema.make({
+    properties: Option.fromNullable(params.properties),
+    required: Option.fromNullable(params.required),
+    type: "object"
+  })
+
+export class Tool extends Schema.Class<Tool>("Domain/Tool")({
+  name: Schema.String,
+  description: Schema.optionalWith(Schema.String, { as: "Option", exact: true }),
+  inputSchema: ToolSchema
+}) {
+  readonly [TypeId] = TypeId
+
+  static fromSchema = <S extends Schema.Schema.AnyNoContext>(schema: S) => {
+    const name = SchemaAST.getJSONIdentifier(
+      Schema.typeSchema(schema).ast
+    ).pipe(Option.getOrElse(() => ""))
+
+    const description = SchemaAST.getDescriptionAnnotation(
+      Schema.typeSchema(schema).ast
+    )
+
+    return new Tool({
+      name,
+      description,
+      inputSchema: ToolSchema.fromSchema(schema)
+    })
+  }
+}
+
+// Core domain error
+export class ToolError extends Schema.TaggedError<ToolError>()("ToolError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
+}) {}
 
 // Error types
 export class ToolValidationError extends Schema.TaggedError<ToolValidationError>()("ToolValidationError", {
@@ -27,10 +105,10 @@ export class ToolDefinition<I, O> {
   }
 
   // Process a tool call with validation
-  process(args: Record<string, unknown> | undefined) {
+  process(args: Option.Option<Record<string, unknown>>) {
     const { handler, inputSchema, metadata } = this
 
-    return Schema.decodeUnknown(inputSchema)(args || {}).pipe(
+    return Schema.decodeUnknown(inputSchema)(Option.getOrElse(args, () => {})).pipe(
       Effect.mapError((cause) =>
         new ToolValidationError({
           cause,
@@ -64,58 +142,41 @@ export class ToolRegistryImpl {
   }
 }
 
+const GetNameSchema = Schema.Struct({}).annotations({
+  identifier: "GetNameInput",
+  description: "Get the current user's name"
+})
+
 // Define tool instances
 export const GetNameTool = ToolDefinition.make(
-  Tool.make({
-    name: "GetName",
-    description: Option.some("Get the current user's name"),
-    inputSchema: {
-      properties: Option.none(),
-      required: Option.none(),
-      type: "object"
-    }
-  }),
-  Schema.Struct({}).annotations({ identifier: "GetNameInput" }),
+  Tool.fromSchema(GetNameSchema),
+  GetNameSchema,
   (_input) => Effect.succeed("Jonathan")
 )
 
+const EchoSchema = Schema.Struct({
+  message: Schema.String
+}).annotations({
+  identifier: "EchoInput",
+  description: "Echo back the input message"
+})
+
 export const EchoTool = ToolDefinition.make(
-  Tool.make({
-    name: "Echo",
-    description: Option.some("Echo back the input message"),
-    inputSchema: {
-      properties: Option.some({
-        message: {
-          type: "string"
-        }
-      }),
-      required: Option.some(["message"]),
-      type: "object"
-    }
-  }),
-  Schema.Struct({
-    message: Schema.String
-  }).annotations({ identifier: "EchoInput" }),
+  Tool.fromSchema(EchoSchema),
+  EchoSchema,
   (input) => Effect.succeed(input.message)
 )
 
+const CalculatorSchema = Schema.Struct({
+  expression: Schema.String
+}).annotations({
+  identifier: "CalculatorInput",
+  description: "Evaluate a mathematical expression"
+})
+
 export const CalculatorTool = ToolDefinition.make(
-  Tool.make({
-    name: "Calculator",
-    description: Option.some("Evaluate a mathematical expression"),
-    inputSchema: {
-      properties: Option.some({
-        expression: {
-          type: "string"
-        }
-      }),
-      required: Option.some(["expression"]),
-      type: "object"
-    }
-  }),
-  Schema.Struct({
-    expression: Schema.String
-  }).annotations({ identifier: "CalculatorInput" }),
+  Tool.fromSchema(CalculatorSchema),
+  CalculatorSchema,
   (input) =>
     Effect.try({
       try: () => {
@@ -171,7 +232,14 @@ export class ToolRegistry extends Effect.Service<ToolRegistry>()("ToolRegistry",
       )
 
     // Call a tool with arguments
-    const call = (request: { name: string; arguments?: Record<string, unknown> }) =>
+    const call = (
+      request: { name: string; arguments: Option.Option<Record<string, unknown>> }
+    ): Effect.Effect<
+      Either.Either<
+        ReadonlyArray<TextContent | ImageContent | EmbeddedResource>,
+        ReadonlyArray<TextContent | ImageContent | EmbeddedResource>
+      >
+    > =>
       Effect.gen(function*() {
         const toolDef = yield* findByName(request.name)
 
@@ -187,12 +255,9 @@ export class ToolRegistry extends Effect.Service<ToolRegistry>()("ToolRegistry",
           })
           : result
 
-        // Convert to proper response format
-        return CallToolResult.make({
-          _meta: Option.none(),
-          content: Array.isArray(content) ? content : [content],
-          isError: Option.none()
-        })
+        return Either.right(
+          Array.isArray(content) ? content : [content]
+        )
       }).pipe(
         // Handle errors
         Effect.catchAll((error) => {
@@ -200,19 +265,15 @@ export class ToolRegistry extends Effect.Service<ToolRegistry>()("ToolRegistry",
             ? error.message
             : `Error executing tool: ${error}`
 
-          return Effect.succeed(
-            CallToolResult.make({
-              _meta: Option.none(),
-              content: [
-                TextContent.make({
-                  type: "text",
-                  text: errorMessage,
-                  annotations: Option.none()
-                })
-              ],
-              isError: Option.some(true)
-            })
-          )
+          return Effect.succeed(Either.left(
+            [
+              TextContent.make({
+                type: "text",
+                text: errorMessage,
+                annotations: Option.none()
+              })
+            ]
+          ))
         }),
         Effect.withSpan("ToolRegistry.call", {
           attributes: { toolName: request.name }

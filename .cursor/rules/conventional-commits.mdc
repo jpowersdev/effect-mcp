@@ -1,0 +1,121 @@
+---
+description: Conventional Commits
+globs: .git/COMMIT_EDITMSG
+alwaysApply: false
+---
+# Conventional Commits
+
+Guidelines for using conventional commit messages in the MCP project.
+
+<rule>
+name: conventional_commits
+description: Standards for writing commit messages following the Conventional Commits specification
+filters:
+  # Match git commit message files
+  - type: file_path
+    pattern: "\\.git/COMMIT_EDITMSG$"
+  # Match commit message content
+  - type: event
+    pattern: "pre_commit"
+
+actions:
+  - type: suggest
+    message: |
+      ## Conventional Commits Guidelines
+
+      Commit messages should follow the [Conventional Commits](mdc:https:/www.conventionalcommits.org) specification:
+
+      ```
+      <type>[optional scope]: <description>
+
+      [optional body]
+
+      [optional footer(s)]
+      ```
+
+      ### Types
+      - **feat**: A new feature (correlates with MINOR in Semantic Versioning)
+      - **fix**: A bug fix (correlates with PATCH in Semantic Versioning)
+      - **docs**: Documentation only changes
+      - **style**: Changes that do not affect the meaning of the code
+      - **refactor**: A code change that neither fixes a bug nor adds a feature
+      - **perf**: A code change that improves performance
+      - **test**: Adding missing tests or correcting existing tests
+      - **build**: Changes that affect the build system or external dependencies
+      - **ci**: Changes to CI configuration files and scripts
+      - **chore**: Other changes that don't modify src or test files
+
+      ### Breaking Changes
+      - Add `!` after the type/scope: `feat(api)!: change API response format`
+      - Or add a footer: `BREAKING CHANGE: environment variables now take precedence over config files`
+
+      ### Examples
+
+      #### Feature with scope:
+      ```
+      feat(auth): add ability to logout
+      ```
+
+      #### Bug fix:
+      ```
+      fix: prevent racing of requests
+      
+      Introduce a request id and a reference to latest request.
+      Dismiss incoming responses other than from latest request.
+      ```
+
+      #### Documentation with breaking change:
+      ```
+      docs!: remove deprecated API documentation
+      
+      BREAKING CHANGE: The deprecated v1 API is no longer supported
+      ```
+
+      #### Multiple fixes with scope:
+      ```
+      fix(core): address minor typos in code
+      
+      see the issue for details
+      
+      Reviewed-by: Z
+      Refs: #123
+      ```
+
+  - type: reject
+    conditions:
+      - pattern: "^(?!feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert).*:"
+        message: "Commit type must be one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+      - pattern: "^.{1,}$"
+        not: true
+        message: "Commit message cannot be empty"
+      - pattern: "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-z0-9-]+\\))?(!)?:"
+        not: true
+        message: "Commit message must follow format: <type>[optional scope]: <description>"
+      - pattern: "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-z0-9-]+\\))?(!)?:\\s.+"
+        not: true
+        message: "Description must not be empty and must be separated from type by a space"
+
+examples:
+  - input: |
+      feat(auth): add login functionality
+      
+      Implements OAuth2 login flow with Google and GitHub providers.
+      
+      Closes #42
+    output: "Valid conventional commit message"
+  - input: |
+      fix: resolve race condition in request handling
+      
+      BREAKING CHANGE: API response format has changed
+    output: "Valid conventional commit message with breaking change footer"
+  - input: |
+      feat!: redesign user interface
+    output: "Valid conventional commit message with breaking change indicator"
+  - input: |
+      update stuff
+    output: "Invalid commit message - missing type prefix"
+
+metadata:
+  priority: high
+  version: 1.0
+</rule> 

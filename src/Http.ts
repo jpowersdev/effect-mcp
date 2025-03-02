@@ -10,9 +10,9 @@ import { NodeHttpServer } from "@effect/platform-node"
 import { Config, Effect, Layer, Stream } from "effect"
 import { createServer } from "http"
 import { Api } from "./Api.js"
-import { CurrentSession } from "./Domain/Session.js"
+import { McpProtocolAdapter } from "./McpProtocolAdapter.js"
 import { messageAnnotations, MessageBroker } from "./MessageBroker.js"
-import { SessionManager } from "./SessionManager.js"
+import { CurrentSession, SessionManager } from "./SessionManager.js"
 
 export const HttpMcpLive = HttpApiBuilder.group(
   Api,
@@ -28,14 +28,19 @@ export const HttpMcpLive = HttpApiBuilder.group(
             Effect.orDie
           ))
         .handle("send-message", ({ payload, urlParams }) =>
-          Effect.zipRight(
-            Effect.logDebug(payload),
-            broker.offer({
+          Effect.gen(function*() {
+            // Log the incoming request
+            yield* Effect.log("Received message", {
+              sessionId: urlParams.sessionId,
+              method: payload.method
+            })
+
+            // Send the message to the broker for processing
+            return yield* broker.offer({
               payload,
               sessionId: urlParams.sessionId
             })
-          ).pipe(
-            Effect.tap(() => Effect.log("Received message")),
+          }).pipe(
             Effect.annotateLogs(messageAnnotations({ payload, sessionId: urlParams.sessionId })),
             Effect.annotateSpans({ "session.id": urlParams.sessionId }),
             Effect.provideServiceEffect(
@@ -45,7 +50,7 @@ export const HttpMcpLive = HttpApiBuilder.group(
           ))
         .handleRaw("message-stream", () =>
           Effect.gen(function*() {
-            // Activate the session
+            // Initialize a new session
             const session = yield* sessions.initialize
 
             // Get message stream for session
@@ -63,7 +68,8 @@ export const HttpMcpLive = HttpApiBuilder.group(
 ).pipe(
   Layer.provide([
     MessageBroker.Default,
-    SessionManager.Default
+    SessionManager.Default,
+    McpProtocolAdapter.Default
   ])
 )
 

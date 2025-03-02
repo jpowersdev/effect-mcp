@@ -1,7 +1,7 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "@effect/platform"
 import { Schema } from "effect"
-import { JsonRpcRequest, JsonRpcResponse } from "./Domain/JsonRpc.js"
-import { SessionError, SessionId } from "./Domain/Session.js"
+import { JsonRpcRequest, JsonRpcResponse } from "./JsonRpc.js"
+import { SessionError, SessionId } from "./SessionManager.js"
 
 export class McpApi extends HttpApiGroup.make("mcp")
   .add(

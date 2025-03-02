@@ -1,0 +1,274 @@
+---
+description: Schema Validation Patterns
+globs: src/**/*.ts
+alwaysApply: false
+---
+# Schema Validation Patterns
+
+Guidelines for using Effect's Schema system and SQL Models for data validation in the MCP project.
+
+<rule>
+name: schema_validation
+description: Standards for defining and using schemas for data validation
+filters:
+  # Match TypeScript files
+  - type: file_extension
+    pattern: "\\.ts$"
+  # Match schema-related content
+  - type: content
+    pattern: "(?i)Schema\\.|Model\\."
+
+actions:
+  - type: suggest
+    message: |
+      ## Schema Validation Guidelines
+
+      ### Basic Schema Definitions
+
+      #### Primitive Types and Branding
+      - Use Schema.pipe with Schema.brand to create type-branded primitives
+      - Use descriptive brand names that match the entity they represent
+      ```typescript
+      export const UserId = Schema.Number.pipe(Schema.brand("UserId"))
+      export type UserId = typeof UserId.Type
+
+      export const GroupId = Schema.Number.pipe(Schema.brand("GroupId"))
+      export type GroupId = typeof GroupId.Type
+      ```
+
+      #### String Validation
+      - Use Schema.pattern for regex validation
+      - Add Schema.annotations for documentation
+      - Chain with Schema.brand for type safety
+      ```typescript
+      export const Email = Schema.String.pipe(
+        Schema.pattern(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/),
+        Schema.annotations({
+          title: "Email",
+          description: "An email address",
+        }),
+        Schema.brand("Email")
+      )
+
+      export type Email = typeof Email.Type
+      ```
+
+      #### Type Conversions
+      - Use Schema.compose for type conversions between compatible schemas
+      - Create conversion helpers for common string-to-type conversions
+      ```typescript
+      export const UserIdFromString = Schema.NumberFromString.pipe(
+        Schema.compose(UserId)
+      )
+
+      export const GroupIdFromString = Schema.NumberFromString.pipe(
+        Schema.compose(GroupId)
+      )
+      ```
+
+      ### Model Class Definitions
+
+      #### Model Class Pattern
+      - Use Model.Class to define entity models
+      - Use Model.Generated for auto-generated fields
+      - Use Model.GeneratedByApp for application-generated fields
+      - Use Model.DateTimeInsert and Model.DateTimeUpdate for timestamps
+      ```typescript
+      export class User extends Model.Class<User>("User")({
+        id: Model.Generated(UserId),
+        accountId: Model.GeneratedByApp(AccountId),
+        email: Email,
+        accessToken: Model.Sensitive(AccessToken),
+        createdAt: Model.DateTimeInsert,
+        updatedAt: Model.DateTimeUpdate,
+      }) {}
+      ```
+
+      #### Optional Fields
+      - Use Model.FieldOption for optional fields in models
+      ```typescript
+      export class Person extends Model.Class<Person>("Person")({
+        id: Model.Generated(PersonId),
+        groupId: Model.GeneratedByApp(GroupId),
+        firstName: Schema.NonEmptyTrimmedString,
+        lastName: Schema.NonEmptyTrimmedString,
+        dateOfBirth: Model.FieldOption(Model.Date),
+        createdAt: Model.DateTimeInsert,
+        updatedAt: Model.DateTimeUpdate,
+      }) {}
+      ```
+
+      #### Sensitive Data
+      - Use Model.Sensitive for fields containing sensitive information
+      - Use Schema.Redacted for redacted string values
+      ```typescript
+      export const AccessToken = Schema.Redacted(AccessTokenString)
+      export type AccessToken = typeof AccessToken.Type
+
+      // In model definition
+      accessToken: Model.Sensitive(AccessToken)
+      ```
+
+      ### Error Types
+
+      #### Tagged Errors
+      - Use Schema.TaggedError for domain-specific error types
+      - Include relevant identifiers in error data
+      - Use HttpApiSchema.annotations for HTTP status codes
+      ```typescript
+      export class UserNotFound extends Schema.TaggedError<UserNotFound>()(
+        "UserNotFound",
+        { id: UserId },
+        HttpApiSchema.annotations({ status: 404 })
+      ) {}
+
+      export class GroupNotFound extends Schema.TaggedError<GroupNotFound>()(
+        "GroupNotFound",
+        { id: GroupId },
+        HttpApiSchema.annotations({ status: 404 })
+      ) {}
+      ```
+
+      ### Repository Pattern
+
+      #### Model Repositories
+      - Use Model.makeRepository to create repositories for models
+      - Specify table name, span prefix, and ID column
+      - Extend repositories with custom query methods
+      ```typescript
+      export const make = Model.makeRepository(Account, {
+        tableName: "accounts",
+        spanPrefix: "AccountsRepo",
+        idColumn: "id",
+      })
+
+      export class UsersRepo extends Effect.Service<UsersRepo>()(
+        "Accounts/UsersRepo",
+        {
+          effect: Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const repo = yield* Model.makeRepository(User, {
+              tableName: "users",
+              spanPrefix: "UsersRepo",
+              idColumn: "id",
+            })
+
+            // Custom query methods
+            const findByAccessTokenSchema = SqlSchema.findOne({
+              Request: AccessToken,
+              Result: User,
+              execute: (key) => sql`select * from users where accessToken = ${key}`,
+            })
+            
+            const findByAccessToken = (apiKey: AccessToken) =>
+              pipe(
+                findByAccessTokenSchema(apiKey),
+                Effect.orDie,
+                Effect.withSpan("UsersRepo.findByAccessToken"),
+              )
+
+            return { ...repo, findByAccessToken } as const
+          }),
+          dependencies: [SqlLive],
+        },
+      ) {}
+      ```
+
+      ### SQL Schema Queries
+
+      #### Custom SQL Queries
+      - Use SqlSchema.findOne for single-result queries
+      - Use SqlSchema.findMany for multi-result queries
+      - Specify Request and Result types for type safety
+      ```typescript
+      const findByAccessTokenSchema = SqlSchema.findOne({
+        Request: AccessToken,
+        Result: User,
+        execute: (key) => sql`select * from users where accessToken = ${key}`,
+      })
+      ```
+
+      ### API Schema Integration
+
+      #### HTTP API Parameters
+      - Use HttpApiSchema.param for path parameters with schema validation
+      ```typescript
+      HttpApiEndpoint.get(
+        "getUser",
+      )`/users/${HttpApiSchema.param("id", UserIdFromString)}`
+        .addSuccess(User.json)
+        .addError(UserNotFound)
+      ```
+
+      #### Request/Response Schemas
+      - Use .addSuccess for response schemas
+      - Use .setPayload for request body schemas
+      - Use .addError for error response schemas
+      ```typescript
+      HttpApiEndpoint.post("createUser", "/users")
+        .addSuccess(UserWithSensitive.json)
+        .setPayload(User.jsonCreate)
+      ```
+
+      ### Schema Composition and Extension
+
+      #### Extending Models
+      - Use Model.fields to reference fields from another model
+      - Add additional fields as needed
+      ```typescript
+      export class UserWithSensitive extends Model.Class<UserWithSensitive>(
+        "UserWithSensitive"
+      )({
+        ...Model.fields(User),
+        accessToken: AccessToken,
+        account: Account,
+      }) {}
+      ```
+
+examples:
+  - input: |
+      // ID and type definition
+      export const PersonId = Schema.Number.pipe(Schema.brand("PersonId"))
+      export type PersonId = typeof PersonId.Type
+
+      // String to ID conversion
+      export const PersonIdFromString = Schema.NumberFromString.pipe(
+        Schema.compose(PersonId)
+      )
+
+      // Model class definition
+      export class Person extends Model.Class<Person>("Person")({
+        id: Model.Generated(PersonId),
+        groupId: Model.GeneratedByApp(GroupId),
+        firstName: Schema.NonEmptyTrimmedString,
+        lastName: Schema.NonEmptyTrimmedString,
+        dateOfBirth: Model.FieldOption(Model.Date),
+        createdAt: Model.DateTimeInsert,
+        updatedAt: Model.DateTimeUpdate,
+      }) {}
+
+      // Error type
+      export class PersonNotFound extends Schema.TaggedError<PersonNotFound>()(
+        "PersonNotFound",
+        {
+          id: PersonId,
+        }
+      ) {}
+    output: "Follows schema validation guidelines"
+
+  - input: |
+      // Repository pattern
+      export class PeopleRepo extends Effect.Service<PeopleRepo>()("People/Repo", {
+        effect: Model.makeRepository(Person, {
+          tableName: "people",
+          spanPrefix: "PeopleRepo",
+          idColumn: "id",
+        }),
+        dependencies: [SqlLive],
+      }) {}
+    output: "Follows schema validation guidelines for repositories"
+
+metadata:
+  priority: high
+  version: 1.0
+</rule> 

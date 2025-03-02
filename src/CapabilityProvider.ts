@@ -1,14 +1,13 @@
 import { Effect, Option } from "effect"
-import { ServerCapabilities, ServerImplementation } from "./Domain/Capability.js"
+import { Implementation, ServerCapabilities } from "./Generated.js"
 
 export class CapabilityProvider extends Effect.Service<CapabilityProvider>()("CapabilityProvider", {
   dependencies: [],
   scoped: Effect.gen(function*() {
-    // Protocol version
     const protocolVersion = "2024-11-05"
 
     // Server implementation details
-    const implementation = ServerImplementation.make({
+    const serverInfo = Implementation.make({
       name: "ModelContextProtocolTransport",
       version: "1.0.0"
     })
@@ -18,29 +17,37 @@ export class CapabilityProvider extends Effect.Service<CapabilityProvider>()("Ca
       tools: Option.some({
         listChanged: Option.none()
       }),
-      // Only enable features we actually support
       prompts: Option.some({
         listChanged: Option.none()
       }),
-      logging: Option.some({
-        level: "info"
-      }),
-      experimental: Option.none(),
       resources: Option.some({
         listChanged: Option.none(),
         subscribe: Option.none(),
         templates: Option.some(true)
-      })
+      }),
+      logging: Option.some({
+        level: Option.some("info" as const)
+      }),
+      experimental: Option.none()
     })
 
-    const getProtocolVersion = Effect.succeed(protocolVersion)
-    const getImplementation = Effect.succeed(implementation)
-    const getCapabilities = Effect.succeed(capabilities)
+    const describe = Effect.succeed({
+      capabilities,
+      serverInfo,
+      protocolVersion,
+      instructions: Option.none()
+    }).pipe(
+      Effect.withSpan("CapabilityProvider.describe", {
+        attributes: {
+          protocolVersion,
+          serverInfo,
+          capabilities
+        }
+      })
+    )
 
     return {
-      getProtocolVersion,
-      getImplementation,
-      getCapabilities
+      describe
     } as const
   })
 }) {}

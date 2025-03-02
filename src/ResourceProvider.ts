@@ -1,6 +1,7 @@
 // src/ResourceProvider.ts
 import { Effect, Option, Schema } from "effect"
 import * as os from "os"
+import type { BlobResourceContents } from "./Generated.js"
 import { McpResource, ResourceTemplate, TextResourceContents } from "./Generated.js"
 
 // Error types
@@ -244,14 +245,25 @@ export class ResourceProvider extends Effect.Service<ResourceProvider>()("Resour
     const listTemplates = Effect.succeed(registry.listTemplates())
 
     // Read a resource by URI
-    const read = (uri: string) =>
+    const read = (
+      uri: string
+    ): Effect.Effect<
+      ReadonlyArray<TextResourceContents | BlobResourceContents>,
+      ResourceNotFoundError | ResourceValidationError
+    > =>
       Effect.gen(function*() {
         // First check if it's a direct resource
         const resourceDef = registry.getResource(uri)
         if (resourceDef) {
           // Execute the handler to get the resource content
           const resource = yield* resourceDef.handler()
-          return [resource]
+          return [
+            TextResourceContents.make({
+              text: resource.text,
+              mimeType: resource.mimeType,
+              uri
+            })
+          ] as const
         }
 
         // If not, check if it matches any template
@@ -260,11 +272,17 @@ export class ResourceProvider extends Effect.Service<ResourceProvider>()("Resour
         if (Option.isSome(templateMatch)) {
           const [template, params] = templateMatch.value
           const result = yield* template.process(params)
-          return [result]
+          return [
+            TextResourceContents.make({
+              text: result.text,
+              mimeType: result.mimeType,
+              uri
+            })
+          ] as const
         }
 
         // If no match found, return error
-        throw new ResourceNotFoundError({
+        return yield* new ResourceNotFoundError({
           cause: new Error(`Resource not found: ${uri}`),
           message: `Resource '${uri}' not found`
         })
