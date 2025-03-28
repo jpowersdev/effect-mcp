@@ -43,6 +43,7 @@ export class StdioTransport extends Effect.Service<StdioTransport>()("StdioTrans
         // Send output to terminal
         const outputFiber = yield* broker.messagesById(session.id).pipe(
           Stream.tap((message) => terminal.display(message + "\n")),
+          Stream.withSpan("StdioTransport.output"),
           Stream.runDrain,
           Effect.fork
         )
@@ -61,6 +62,7 @@ export class StdioTransport extends Effect.Service<StdioTransport>()("StdioTrans
               )
             )
           ),
+          Stream.withSpan("StdioTransport.input"),
           Stream.runDrain,
           Effect.fork
         )

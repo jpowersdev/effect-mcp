@@ -1,3 +1,4 @@
+import { AiToolkit } from "@effect/ai"
 import { Effect, Option } from "effect"
 import { Implementation, ServerCapabilities } from "./Generated.js"
 
@@ -12,11 +13,17 @@ export class CapabilityProvider extends Effect.Service<CapabilityProvider>()("Ca
       version: "1.0.0"
     })
 
+    const toolkit = yield* Effect.serviceOption(AiToolkit.Registry)
+
+    const tools = toolkit.pipe(
+      Option.map(() => ({
+        listChanged: Option.none()
+      }))
+    )
+
     // Available capabilities
     const capabilities = ServerCapabilities.make({
-      tools: Option.some({
-        listChanged: Option.none()
-      }),
+      tools,
       prompts: Option.some({
         listChanged: Option.none()
       }),
@@ -26,7 +33,7 @@ export class CapabilityProvider extends Effect.Service<CapabilityProvider>()("Ca
         templates: Option.some(true)
       }),
       logging: Option.some({
-        level: Option.some("info" as const)
+        level: "info" as const
       }),
       experimental: Option.none()
     })
