@@ -93,12 +93,28 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
       Effect.fork
     )
 
+    const messagesById = (sessionId: SessionId) =>
+      Effect.gen(function*() {
+        const mailbox = yield* RcMap.get(mailboxes, sessionId)
+        return Mailbox.toStream(mailbox).pipe(
+          Stream.map((_) => Struct.omit(_ as any, "_tag")),
+          Stream.mapEffect((response) => Schema.encodeUnknown(Schema.parseJson(JsonRpcResponse))(response)),
+          Stream.tap((response) =>
+            Effect.log("Response").pipe(
+              Effect.annotateLogs({ response })
+            )
+          )
+        )
+      }).pipe(
+        Effect.withSpan("MessageBroker.messagesById", {
+          attributes: { sessionId }
+        }),
+        Stream.unwrap
+      )
+
     // Stream messages for a specific session
     const messages = (sessionId: SessionId) =>
       Effect.gen(function*() {
-        // Get or create mailbox for session
-        const mailbox = yield* RcMap.get(mailboxes, sessionId)
-
         // Create endpoint URL for client publishing
         const endpoint = `/messages?sessionId=${sessionId}`
 
@@ -113,14 +129,7 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
         )
 
         // Stream of messages from the mailbox
-        const messageStream = Mailbox.toStream(mailbox).pipe(
-          Stream.map((_) => Struct.omit(_ as any, "_tag")),
-          Stream.mapEffect((response) => Schema.encodeUnknown(Schema.parseJson(JsonRpcResponse))(response)),
-          Stream.tap((response) =>
-            Effect.log("sending response").pipe(
-              Effect.annotateLogs({ response })
-            )
-          ),
+        const messageStream = messagesById(sessionId).pipe(
           Stream.map((response) => `event: message\ndata: ${response}\n\n`)
         )
 
@@ -146,6 +155,7 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
 
     return {
       messages,
+      messagesById,
       offer
     } as const
   })
