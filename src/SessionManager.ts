@@ -91,10 +91,12 @@ export class SessionManager extends Effect.Service<SessionManager>()("SessionMan
 
     const findById = (id: string) =>
       TMap.get(sessions, id).pipe(
-        Effect.map(Option.getOrElse(() => {
-          throw new SessionError({
-            message: `Session ${id} not found`
-          })
+        Effect.flatMap(Option.match({
+          onSome: Effect.succeed,
+          onNone: () =>
+            new SessionError({
+              message: `Session ${id} not found`
+            })
         })),
         Effect.withSpan("SessionManager.findById", {
           attributes: { sessionId: id }

@@ -175,19 +175,14 @@ export class McpProtocolAdapter extends Effect.Service<McpProtocolAdapter>()("Mc
         yield* Effect.logDebug("Processing request")
 
         const result = yield* decode(request).pipe(
-          Effect.flatMap((_) => handle(session)(_)),
-          Effect.tap((result) =>
-            Effect.log("Generated result").pipe(
-              Effect.annotateLogs({ "mcp.result": result })
-            )
-          )
+          Effect.flatMap((_) => handle(session)(_))
         )
 
-        yield* Effect.annotateCurrentSpan({
-          result
-        })
-
         if (Either.isLeft(result)) {
+          yield* Effect.annotateCurrentSpan({
+            "mcp.error": result.left
+          })
+
           yield* Effect.logError("Error processing request").pipe(
             Effect.annotateLogs({ cause: result.left })
           )
@@ -201,6 +196,10 @@ export class McpProtocolAdapter extends Effect.Service<McpProtocolAdapter>()("Mc
             }
           }))
         }
+
+        yield* Effect.annotateCurrentSpan({
+          "mcp.result": result.right
+        })
 
         const succeed = (value: unknown) =>
           Effect.map(

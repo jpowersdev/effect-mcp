@@ -79,100 +79,89 @@ export class Tools extends Effect.Service<Tools>()("Tools", {
     )
 
     const call: {
-      (
-        request: CallToolRequest
-      ): Effect.Effect<CallToolResult, never, never>
-    } = Effect.fn("Tools.call", {
-      root: true
-    })(
+      (request: CallToolRequest): Effect.Effect<CallToolResult, never, never>
+    } = Effect.fn("Tools.call")(
       function*(request: CallToolRequest) {
         yield* Effect.annotateCurrentSpan({
           tool: request.params.name,
           arguments: request.params.arguments
         })
 
-        return yield* Option.match(toolkit, {
-          onNone: () =>
-            Effect.succeed(CallToolResult.make({
-              content: [
-                TextContent.make({
-                  type: "text",
-                  text: new Cause.IllegalArgumentException("No toolkit found").message,
-                  annotations: Option.none()
-                })
-              ],
+        if (toolkit._tag === "None") {
+          return CallToolResult.make({
+            content: [
+              TextContent.make({
+                type: "text",
+                text: new Cause.IllegalArgumentException("No toolkit found").message,
+                annotations: Option.none()
+              })
+            ],
+            isError: Option.some(true),
+            _meta: Option.some({})
+          })
+        }
+
+        const result = yield* Effect.either(Effect.gen(function*() {
+          const tool = pipe(
+            Array.fromIterable(toolkit.value.keys()),
+            Array.findFirst((schema) => schema._tag === request.params.name)
+          )
+
+          if (tool._tag === "None") {
+            return yield* new Cause.NoSuchElementException(`Tool ${request.params.name} not found`)
+          }
+
+          const handler = Option.fromNullable(toolkit.value.get(tool.value))
+
+          if (handler._tag === "None") {
+            return yield* new Cause.NoSuchElementException(`Tool ${request.params.name} handler not found`)
+          }
+
+          if (request.params.arguments._tag === "None") {
+            return yield* new Cause.IllegalArgumentException("No arguments provided")
+          }
+
+          const result = yield* handler.value(injectTag(
+            request.params.arguments.value,
+            tool.value._tag
+          )) as Effect.Effect<unknown, never, never>
+
+          yield* Effect.logDebug("Result").pipe(
+            Effect.annotateLogs({ result })
+          )
+
+          const text = Match.value(result).pipe(
+            Match.when(Match.undefined, () => ""),
+            Match.when(Match.string, (value) => value),
+            Match.orElse((value) => JSON.stringify(value))
+          )
+
+          return [
+            TextContent.make({
+              type: "text",
+              text,
+              annotations: Option.none()
+            })
+          ]
+        }))
+
+        return Either.match(result, {
+          onLeft: (error) =>
+            CallToolResult.make({
+              content: [TextContent.make({
+                type: "text",
+                text: error.message,
+                annotations: Option.none()
+              })],
               isError: Option.some(true),
               _meta: Option.some({})
-            })),
-          onSome: (toolkit) =>
-            Effect.either(Effect.gen(function*() {
-              yield* Effect.annotateCurrentSpan({
-                tool: request.params.name,
-                arguments: request.params.arguments
-              })
-
-              const tool = pipe(
-                Array.fromIterable(toolkit.keys()),
-                Array.findFirst((schema) => schema._tag === request.params.name)
-              )
-
-              if (tool._tag === "None") {
-                return yield* new Cause.NoSuchElementException(`Tool ${request.params.name} not found`)
-              }
-
-              const handler = Option.fromNullable(toolkit.get(tool.value))
-
-              if (handler._tag === "None") {
-                return yield* Effect.fail(new Error(`Tool ${request.params.name} handler not found`))
-              }
-
-              const result = yield* handler.value(injectTag(
-                request.params.arguments,
-                tool.value._tag
-              )) as Effect.Effect<unknown, never, never>
-
-              yield* Effect.annotateCurrentSpan({
-                result
-              })
-
-              yield* Effect.logDebug("Result").pipe(
-                Effect.annotateLogs({ result }),
-                Effect.withSpan("Tools.call.result")
-              )
-
-              const text = Match.value(result).pipe(
-                Match.when(Match.undefined, () => ""),
-                Match.when(Match.string, (value) => value),
-                Match.orElse((value) => JSON.stringify(value))
-              )
-
-              return [
-                TextContent.make({
-                  type: "text",
-                  text,
-                  annotations: Option.none()
-                })
-              ]
-            })).pipe(
-              Effect.map(Either.match({
-                onLeft: (error) =>
-                  CallToolResult.make({
-                    content: [TextContent.make({
-                      type: "text",
-                      text: error.message,
-                      annotations: Option.none()
-                    })],
-                    isError: Option.some(true),
-                    _meta: Option.some({})
-                  }),
-                onRight: (content) =>
-                  CallToolResult.make({
-                    content,
-                    isError: Option.none(),
-                    _meta: Option.none()
-                  })
-              }))
-            )
+            }),
+          onRight: (content) =>
+            CallToolResult.make({
+              content,
+              isError: Option.none(),
+              _meta: Option.none()
+            })
         })
       }
     )
