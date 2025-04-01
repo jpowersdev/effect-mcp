@@ -1,6 +1,7 @@
 import { AiToolkit } from "@effect/ai"
 import { NodeRuntime } from "@effect/platform-node"
 import { Effect, Layer, Schema } from "effect"
+import { McpServer } from "./McpServer.js"
 import { StdioTransport } from "./StdioTransport.js"
 import { TracingLive } from "./Tracing.js"
 
@@ -25,6 +26,11 @@ const ToolkitLive = Toolkit.implement((handlers) =>
 const Env = Layer.mergeAll(
   TracingLive,
   StdioTransport.WithLogger.pipe(
+    Layer.provide(McpServer.layer({
+      name: "Echo",
+      version: "1.0.0",
+      protocolVersion: "2024-11-05"
+    })),
     Layer.provide([
       ToolkitLive
     ])

@@ -1,6 +1,5 @@
 import { Effect, Either, flow, Match, Option, Schema } from "effect"
 import type { ParseError } from "effect/ParseResult"
-import { CapabilityProvider } from "./CapabilityProvider.js"
 import {
   CallToolRequest,
   CallToolResult,
@@ -24,10 +23,10 @@ import {
 } from "./Generated.js"
 import type { JsonRpcRequest, JsonRpcResponse } from "./JsonRpc.js"
 import { JsonRpcError, JsonRpcSuccess } from "./JsonRpc.js"
+import { McpServer } from "./McpServer.js"
 import { PromptProvider } from "./PromptProvider.js"
 import { ResourceProvider } from "./ResourceProvider.js"
-import type { Session } from "./SessionManager.js"
-import { SessionManager } from "./SessionManager.js"
+import { CurrentSession, SessionManager } from "./SessionManager.js"
 import { Tools } from "./Tools.js"
 
 const Request = Schema.Union(
@@ -55,6 +54,43 @@ const Result = Schema.Union(
   GetPromptResult
 )
 
+export const requestAnnotations = (request: JsonRpcRequest) => {
+  return {
+    "mcp.id": request.id,
+    "mcp.method": request.method,
+    "mcp.params": request.params
+  }
+}
+
+const decode = Schema.decodeUnknown(Request, { onExcessProperty: "preserve" })
+const encode = Schema.encodeUnknown(Result, { onExcessProperty: "preserve" })
+
+/**
+ * Return empty object
+ */
+const emptyResponse = Effect.succeed({})
+
+/**
+ * Do not respond
+ */
+const noReply = Effect.succeedNone
+
+const withMeta = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+  self.pipe(
+    Effect.map((result) => ({
+      ...result,
+      _meta: Option.none()
+    }))
+  )
+
+const withPagination = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+  self.pipe(
+    Effect.map((result) => ({
+      ...result,
+      nextCursor: Option.none()
+    }))
+  )
+
 /**
  * McpProtocolAdapter handles the translation between MCP protocol messages and domain services.
  * It's responsible for:
@@ -64,7 +100,6 @@ const Result = Schema.Union(
  */
 export class McpProtocolAdapter extends Effect.Service<McpProtocolAdapter>()("McpProtocolAdapter", {
   dependencies: [
-    CapabilityProvider.Default,
     SessionManager.Default,
     ResourceProvider.Default,
     PromptProvider.Default,
@@ -72,111 +107,73 @@ export class McpProtocolAdapter extends Effect.Service<McpProtocolAdapter>()("Mc
   ],
   scoped: Effect.gen(function*() {
     const tools = yield* Tools
-    const capabilities = yield* CapabilityProvider
+    const server = yield* McpServer
     const sessions = yield* SessionManager
     const resources = yield* ResourceProvider
     const prompts = yield* PromptProvider
 
-    const decode = Schema.decodeUnknown(Request, { onExcessProperty: "preserve" })
-    const encode = Schema.encodeUnknown(Result, { onExcessProperty: "preserve" })
-
-    /**
-     * Return empty object
-     */
-    const emptyResponse = Effect.succeed({})
-
-    /**
-     * Do not respond
-     */
-    const noReply = Effect.succeedNone
-
-    const withMeta = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-      self.pipe(
-        Effect.map((result) => ({
-          ...result,
-          _meta: Option.none()
-        }))
-      )
-
-    const withPagination = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-      self.pipe(
-        Effect.map((result) => ({
-          ...result,
-          nextCursor: Option.none()
-        }))
-      )
-
-    const handle = (session: Session) =>
-      Effect.fn("McpProtocolAdapter.handle")(function*(request: typeof Request.Type) {
-        yield* Effect.annotateCurrentSpan({
-          request,
-          session
-        })
-
-        return yield* Effect.either(
-          Match.value(request).pipe(
-            Match.discriminatorsExhaustive("method")({
-              initialize: () =>
-                capabilities.describe.pipe(
-                  withMeta
-                ),
-              ping: () => emptyResponse,
-              "notifications/initialized": () =>
-                sessions.activateById(session.id).pipe(
-                  Effect.andThen(() => noReply)
-                ),
-              "notifications/cancelled": () =>
-                sessions.deactivateById(session.id).pipe(
-                  Effect.andThen(() => noReply)
-                ),
-              "tools/list": () =>
-                Effect.all({ tools: tools.list }).pipe(
-                  flow(withMeta, withPagination)
-                ),
-              "tools/call": (request) => tools.call(request),
-              "resources/list": () =>
-                Effect.all({ resources: resources.list }).pipe(
-                  flow(withMeta, withPagination)
-                ),
-              "resources/templates/list": () =>
-                Effect.all({ resourceTemplates: resources.listTemplates }).pipe(
-                  flow(withMeta, withPagination)
-                ),
-              "resources/read": ({ params }) =>
-                Effect.all({ contents: resources.read(params.uri) }).pipe(
-                  withMeta
-                ),
-              "prompts/list": () =>
-                Effect.all({ prompts: prompts.list }).pipe(
-                  flow(withMeta, withPagination)
-                ),
-              "prompts/get": (request) =>
-                prompts.get(request).pipe(
-                  Effect.map(({ messages, prompt }) => ({
-                    description: prompt.description,
-                    messages
-                  })),
-                  withMeta
-                )
-            })
-          )
-        )
+    const handle = Effect.fn("McpProtocolAdapter.handle")(function*(request: typeof Request.Type) {
+      const session = yield* CurrentSession
+      yield* Effect.annotateCurrentSpan({
+        "session.id": session.id
       })
+
+      const result = Match.value(request).pipe(
+        Match.discriminatorsExhaustive("method")({
+          initialize: () => server.initialize,
+          ping: () => emptyResponse,
+          "notifications/initialized": () =>
+            sessions.activateById(session.id).pipe(
+              Effect.andThen(() => noReply)
+            ),
+          "notifications/cancelled": () =>
+            sessions.deactivateById(session.id).pipe(
+              Effect.andThen(() => noReply)
+            ),
+          "tools/list": () => tools.list,
+          "tools/call": (request) => tools.call(request),
+          "resources/list": () =>
+            Effect.all({ resources: resources.list }).pipe(
+              flow(withMeta, withPagination)
+            ),
+          "resources/templates/list": () =>
+            Effect.all({ resourceTemplates: resources.listTemplates }).pipe(
+              flow(withMeta, withPagination)
+            ),
+          "resources/read": ({ params }) =>
+            Effect.all({ contents: resources.read(params.uri) }).pipe(
+              withMeta
+            ),
+          "prompts/list": () =>
+            Effect.all({ prompts: prompts.list }).pipe(
+              flow(withMeta, withPagination)
+            ),
+          "prompts/get": (request) =>
+            prompts.get(request).pipe(
+              Effect.map(({ messages, prompt }) => ({
+                description: prompt.description,
+                messages
+              })),
+              withMeta
+            )
+        })
+      )
+
+      return yield* Effect.either(result)
+    })
 
     /**
      * Process an MCP request and return an MCP response
      * Assumes the request has already been validated as a valid JsonRpcRequest
      */
     const processRequest = Effect.fn("McpProtocolAdapter.processRequest")((
-      session: Session,
       request: JsonRpcRequest
-    ): Effect.Effect<Option.Option<JsonRpcResponse>, JsonRpcError | ParseError> =>
+    ): Effect.Effect<Option.Option<JsonRpcResponse>, JsonRpcError | ParseError, CurrentSession> =>
       Effect.gen(function*() {
-        yield* Effect.logDebug("Processing request")
+        yield* Effect.annotateCurrentSpan(requestAnnotations(request))
 
-        const result = yield* decode(request).pipe(
-          Effect.flatMap((_) => handle(session)(_))
-        )
+        const decoded = yield* decode(request)
+        const result = yield* handle(decoded)
 
         if (Either.isLeft(result)) {
           yield* Effect.annotateCurrentSpan({

@@ -4,6 +4,7 @@ import { AiToolkit } from "@effect/ai"
 import { HttpMiddleware, HttpRouter, HttpServer } from "@effect/platform"
 import { Effect, Layer, Schema } from "effect"
 import { createServer } from "http"
+import { McpServer } from "./McpServer.js"
 import { SseTransport } from "./SseTransport.js"
 import { TracingLive } from "./Tracing.js"
 
@@ -44,6 +45,10 @@ const app = Layer.unwrapEffect(SseTransport.pipe(
 const Env = Layer.mergeAll(
   TracingLive,
   SseTransport.Default.pipe(
+    Layer.provide(McpServer.layer({
+      name: "MCP Server",
+      version: "0.0.1"
+    })),
     Layer.provide([
       ToolkitLive
     ])

@@ -1,7 +1,7 @@
 import { AiToolkit } from "@effect/ai"
 import { Array, Cause, Effect, Either, JSONSchema, Match, Option, pipe, Predicate, SchemaAST, Struct } from "effect"
 import type { CallToolRequest } from "./Generated.js"
-import { CallToolResult, TextContent, Tool } from "./Generated.js"
+import { CallToolResult, ListToolsResult, TextContent, Tool } from "./Generated.js"
 
 const makeJsonSchema = (ast: SchemaAST.AST): JSONSchema.JsonSchema7 => {
   const $defs = {}
@@ -67,12 +67,17 @@ export class Tools extends Effect.Service<Tools>()("Tools", {
 
     const enabled = Option.isSome(toolkit)
 
-    const list: Effect.Effect<Array<Tool>, Cause.NoSuchElementException> = Option.match(toolkit, {
+    const list: Effect.Effect<ListToolsResult, Cause.NoSuchElementException> = Option.match(toolkit, {
       onNone: () => Effect.fail(new Cause.NoSuchElementException("No toolkit found")),
       onSome: (toolkit) =>
-        Effect.forEach(
-          toolkit.keys(),
-          (schema) => Effect.sync(() => convertTool(schema))
+        Effect.forEach(toolkit.keys(), (schema) => Effect.sync(() => convertTool(schema))).pipe(
+          Effect.map((tools) =>
+            ListToolsResult.make({
+              tools,
+              _meta: Option.none(),
+              nextCursor: Option.none()
+            })
+          )
         )
     }).pipe(
       Effect.withSpan("Tools.list")
