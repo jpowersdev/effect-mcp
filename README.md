@@ -25,9 +25,9 @@ We aim to provide:
 - [x] SseTransport
 - [x] StdioTransport
 - [x] Tools using AiToolkit
-- [] Prompts using PromptKit
-- [] Resources using ResourceKit
-- [] `listChanged` support for capabilities
+- [ ] Prompts using PromptKit
+- [ ] Resources using ResourceKit
+- [ ] `listChanged` support for capabilities
 
 ## Getting Started
 
