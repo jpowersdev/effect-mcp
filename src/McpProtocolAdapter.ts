@@ -1,5 +1,5 @@
 import { Effect, Either, flow, Match, Option, Schema } from "effect"
-import { CapabilityProvider } from "./CapabilityProvider.js"
+import type { ParseError } from "effect/ParseResult"
 import {
   CallToolRequest,
   CallToolResult,
@@ -23,11 +23,11 @@ import {
 } from "./Generated.js"
 import type { JsonRpcRequest, JsonRpcResponse } from "./JsonRpc.js"
 import { JsonRpcError, JsonRpcSuccess } from "./JsonRpc.js"
+import { McpServer } from "./McpServer.js"
 import { PromptProvider } from "./PromptProvider.js"
 import { ResourceProvider } from "./ResourceProvider.js"
-import type { Session } from "./SessionManager.js"
-import { SessionManager } from "./SessionManager.js"
-import { ToolRegistry } from "./ToolRegistry.js"
+import { CurrentSession, SessionManager } from "./SessionManager.js"
+import { Tools } from "./Tools.js"
 
 const Request = Schema.Union(
   InitializeRequest,
@@ -54,6 +54,43 @@ const Result = Schema.Union(
   GetPromptResult
 )
 
+export const requestAnnotations = (request: JsonRpcRequest) => {
+  return {
+    "mcp.id": request.id,
+    "mcp.method": request.method,
+    "mcp.params": request.params
+  }
+}
+
+const decode = Schema.decodeUnknown(Request, { onExcessProperty: "preserve" })
+const encode = Schema.encodeUnknown(Result, { onExcessProperty: "preserve" })
+
+/**
+ * Return empty object
+ */
+const emptyResponse = Effect.succeed({})
+
+/**
+ * Do not respond
+ */
+const noReply = Effect.succeedNone
+
+const withMeta = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+  self.pipe(
+    Effect.map((result) => ({
+      ...result,
+      _meta: Option.none()
+    }))
+  )
+
+const withPagination = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+  self.pipe(
+    Effect.map((result) => ({
+      ...result,
+      nextCursor: Option.none()
+    }))
+  )
+
 /**
  * McpProtocolAdapter handles the translation between MCP protocol messages and domain services.
  * It's responsible for:
@@ -63,55 +100,27 @@ const Result = Schema.Union(
  */
 export class McpProtocolAdapter extends Effect.Service<McpProtocolAdapter>()("McpProtocolAdapter", {
   dependencies: [
-    ToolRegistry.Default,
-    CapabilityProvider.Default,
     SessionManager.Default,
     ResourceProvider.Default,
-    PromptProvider.Default
+    PromptProvider.Default,
+    Tools.Default
   ],
   scoped: Effect.gen(function*() {
-    const tools = yield* ToolRegistry
-    const capabilities = yield* CapabilityProvider
+    const tools = yield* Tools
+    const server = yield* McpServer
     const sessions = yield* SessionManager
     const resources = yield* ResourceProvider
     const prompts = yield* PromptProvider
 
-    const decode = Schema.decodeUnknown(Request, { onExcessProperty: "preserve" })
-    const encode = Schema.encodeUnknown(Result, { onExcessProperty: "preserve" })
+    const handle = Effect.fn("McpProtocolAdapter.handle")(function*(request: typeof Request.Type) {
+      const session = yield* CurrentSession
+      yield* Effect.annotateCurrentSpan({
+        "session.id": session.id
+      })
 
-    /**
-     * Return empty object
-     */
-    const emptyResponse = Effect.succeed({})
-
-    /**
-     * Do not respond
-     */
-    const noReply = Effect.succeedNone
-
-    const withMeta = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-      self.pipe(
-        Effect.map((result) => ({
-          ...result,
-          _meta: Option.none()
-        }))
-      )
-
-    const withPagination = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-      self.pipe(
-        Effect.map((result) => ({
-          ...result,
-          nextCursor: Option.none()
-        }))
-      )
-
-    const handle = (session: Session) =>
-      Match.type<typeof Request.Type>().pipe(
+      const result = Match.value(request).pipe(
         Match.discriminatorsExhaustive("method")({
-          initialize: () =>
-            capabilities.describe.pipe(
-              withMeta
-            ),
+          initialize: () => server.initialize,
           ping: () => emptyResponse,
           "notifications/initialized": () =>
             sessions.activateById(session.id).pipe(
@@ -121,18 +130,8 @@ export class McpProtocolAdapter extends Effect.Service<McpProtocolAdapter>()("Mc
             sessions.deactivateById(session.id).pipe(
               Effect.andThen(() => noReply)
             ),
-          "tools/list": () =>
-            Effect.all({ tools: tools.list }).pipe(
-              flow(withMeta, withPagination)
-            ),
-          "tools/call": (request) =>
-            tools.call(request.params).pipe(
-              Effect.map(Either.match({
-                onLeft: (content) => ({ content, isError: Option.some(true) }),
-                onRight: (content) => ({ content, isError: Option.none() })
-              })),
-              withMeta
-            ),
+          "tools/list": () => tools.list,
+          "tools/call": (request) => tools.call(request),
           "resources/list": () =>
             Effect.all({ resources: resources.list }).pipe(
               flow(withMeta, withPagination)
@@ -160,53 +159,67 @@ export class McpProtocolAdapter extends Effect.Service<McpProtocolAdapter>()("Mc
         })
       )
 
+      return yield* Effect.either(result)
+    })
+
     /**
      * Process an MCP request and return an MCP response
      * Assumes the request has already been validated as a valid JsonRpcRequest
      */
-    const processRequest = (
-      session: Session,
+    const processRequest = Effect.fn("McpProtocolAdapter.processRequest")((
       request: JsonRpcRequest
-    ): Effect.Effect<Option.Option<JsonRpcResponse>, JsonRpcError> =>
+    ): Effect.Effect<Option.Option<JsonRpcResponse>, JsonRpcError | ParseError, CurrentSession> =>
       Effect.gen(function*() {
-        yield* Effect.logDebug("Processing request")
+        yield* Effect.annotateCurrentSpan(requestAnnotations(request))
 
-        const result = yield* decode(request).pipe(
-          Effect.flatMap((_) => handle(session)(_))
-        )
+        const decoded = yield* decode(request)
+        const result = yield* handle(decoded)
 
-        // Handle special return values
-        if (Option.isOption(result) && Option.isNone(result)) {
-          return Option.none()
+        if (Either.isLeft(result)) {
+          yield* Effect.annotateCurrentSpan({
+            "mcp.error": result.left
+          })
+
+          yield* Effect.logError("Error processing request").pipe(
+            Effect.annotateLogs({ cause: result.left })
+          )
+
+          return Option.some(JsonRpcError.make({
+            id: Option.fromNullable(request.id),
+            error: {
+              code: -32000,
+              message: "Internal server error",
+              data: Option.none()
+            }
+          }))
         }
 
-        const encoded = yield* encode(result)
+        yield* Effect.annotateCurrentSpan({
+          "mcp.result": result.right
+        })
 
-        return Option.some(JsonRpcSuccess.make({
-          id: Option.fromNullable(request.id),
-          result: encoded
-        }))
+        const succeed = (value: unknown) =>
+          Effect.map(
+            encode(value),
+            (result) =>
+              Option.some(JsonRpcSuccess.make({
+                id: Option.fromNullable(request.id),
+                result
+              }))
+          )
+
+        if (Option.isOption(result.right)) {
+          return yield* Option.match(result.right, {
+            onSome: (value) => succeed(value),
+            onNone: () => Effect.succeedNone
+          })
+        }
+
+        return yield* succeed(result.right)
       }).pipe(
-        Effect.tapErrorCause(Effect.logError),
-        Effect.tap((result) =>
-          Effect.log("Generated result").pipe(
-            Effect.annotateLogs({ "mcp.result": result })
-          )
-        ),
-        Effect.withSpan("McpProtocolAdapter.processRequest"),
-        Effect.catchAll(() =>
-          Effect.succeedSome(
-            JsonRpcError.make({
-              id: Option.fromNullable(request.id),
-              error: {
-                code: -32000,
-                message: "Internal server error",
-                data: Option.none()
-              }
-            })
-          )
-        )
+        Effect.tapErrorCause(Effect.logError)
       )
+    )
 
     return {
       processRequest

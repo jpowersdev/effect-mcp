@@ -1,18 +1,17 @@
 import { NodeRuntime } from "@effect/platform-node"
-import { Effect, Layer, Logger, LogLevel } from "effect"
-import { HttpLive } from "./Http.js"
-import { TracingLive } from "./Tracing.js"
+import { Effect, Layer } from "effect"
+import { Env } from "./common.js"
+import { StdioTransport } from "./StdioTransport.js"
 
-const Env = Layer.mergeAll(
-  TracingLive,
-  Logger.minimumLogLevel(LogLevel.Debug)
-)
-
-HttpLive.pipe(
-  Layer.provide(Env),
-  Layer.launch,
-  Effect.tapErrorCause((_) => Effect.logError(_)),
-  NodeRuntime.runMain
+StdioTransport.run.pipe(
+  Effect.provide(StdioTransport.WithLogger.pipe(
+    Layer.provide(Env)
+  )),
+  Effect.scoped,
+  NodeRuntime.runMain({
+    disableErrorReporting: true,
+    disablePrettyLogger: true
+  })
 )
 
 process.on("SIGINT", () => {

@@ -11,21 +11,23 @@ export interface Message {
 }
 
 export const messageAnnotations = (message: Message) => {
-  const annotations = {
+  const annotations: Record<string, unknown> = {
     "session.id": message.sessionId,
     "mcp.method": message.payload.method
   }
 
   if (message.payload.id) {
-    Object.assign(annotations, {
-      "mcp.id": message.payload.id
-    })
+    annotations["mcp.id"] = message.payload.id
   }
 
   if (message.payload.params) {
-    Object.assign(annotations, {
-      "mcp.params": message.payload.params
-    })
+    if (Option.isOption(message.payload.params)) {
+      if (message.payload.params._tag === "Some") {
+        annotations["mcp.params"] = message.payload.params.value
+      }
+    } else {
+      annotations["mcp.params"] = message.payload.params
+    }
   }
 
   return annotations
@@ -56,6 +58,8 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
       Stream.tap(() => Effect.log(`Received message`)),
       Stream.mapEffect(({ payload, sessionId }) =>
         Effect.gen(function*() {
+          yield* Effect.annotateCurrentSpan({ payload, sessionId })
+
           // Get the session
           const session = yield* sessions.findById(sessionId)
 
@@ -69,36 +73,55 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
           }
 
           // Process the request using McpProtocolAdapter
-          yield* protocolAdapter.processRequest(session, payload).pipe(
+          yield* protocolAdapter.processRequest(payload).pipe(
             Effect.flatMap(Option.match({
               onNone: () => Effect.void,
               onSome: (response) =>
                 RcMap.get(mailboxes, session.id).pipe(
                   Effect.flatMap((mailbox) => mailbox.offer(response))
                 )
-            }))
+            })),
+            Effect.provideService(CurrentSession, session)
           )
         }).pipe(
-          Effect.annotateLogs(messageAnnotations({ payload, sessionId })),
-          Effect.withSpan("MessageBroker.processMessage", {
-            attributes: {
-              sessionId,
-              method: payload.method,
-              id: payload.id
-            }
-          })
+          Effect.annotateLogs(messageAnnotations({ payload, sessionId }))
         )
       ),
+      Stream.withSpan("MessageBroker.processMessages"),
       Stream.runDrain,
       Effect.fork
     )
 
-    // Stream messages for a specific session
-    const messages = (sessionId: SessionId) =>
-      Effect.gen(function*() {
-        // Get or create mailbox for session
-        const mailbox = yield* RcMap.get(mailboxes, sessionId)
+    const messagesById = (sessionId: SessionId) =>
+      RcMap.get(mailboxes, sessionId).pipe(
+        Effect.map(Mailbox.toStream),
+        Stream.unwrap,
+        Stream.mapEffect((response) =>
+          Effect.gen(function*() {
+            const result = yield* Schema.encodeUnknown(Schema.parseJson(JsonRpcResponse))(
+              Struct.omit(response as any, "_tag")
+            )
 
+            yield* Effect.annotateCurrentSpan({ "response.decoded": result })
+
+            return result
+          }).pipe(Effect.withSpan("MessageBroker.messagesById.result", {
+            attributes: {
+              "session.id": sessionId,
+              "response.raw": response
+            }
+          }))
+        ),
+        Stream.withSpan("MessageBroker.messagesById", {
+          attributes: {
+            "session.id": sessionId
+          }
+        })
+      )
+
+    // Stream messages for a specific session
+    const messages = Effect.fn("MessageBroker.messages")((sessionId: SessionId) =>
+      Effect.gen(function*() {
         // Create endpoint URL for client publishing
         const endpoint = `/messages?sessionId=${sessionId}`
 
@@ -113,14 +136,7 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
         )
 
         // Stream of messages from the mailbox
-        const messageStream = Mailbox.toStream(mailbox).pipe(
-          Stream.map((_) => Struct.omit(_ as any, "_tag")),
-          Stream.mapEffect((response) => Schema.encodeUnknown(Schema.parseJson(JsonRpcResponse))(response)),
-          Stream.tap((response) =>
-            Effect.log("sending response").pipe(
-              Effect.annotateLogs({ response })
-            )
-          ),
+        const messageStream = messagesById(sessionId).pipe(
           Stream.map((response) => `event: message\ndata: ${response}\n\n`)
         )
 
@@ -129,23 +145,25 @@ export class MessageBroker extends Effect.Service<MessageBroker>()("MessageBroke
           Stream.merge(messageStream),
           Stream.onDone(() => Effect.succeed("event:done\ndata:finished\n\n")),
           Stream.withSpan("MessageBroker.messages", {
-            attributes: { sessionId }
+            attributes: { "session.id": sessionId }
           })
         )
       }).pipe(
         Effect.provideServiceEffect(CurrentSession, sessions.findById(sessionId))
       )
+    )
 
     // Offer a new message to processing
-    const offer = (message: Message) =>
-      queue.offer(message).pipe(
-        Effect.withSpan("MessageBroker.offer", {
-          attributes: messageAnnotations(message)
-        })
-      )
+    const offer = Effect.fn("MessageBroker.offer")(
+      function*(message: Message) {
+        yield* Effect.annotateCurrentSpan(messageAnnotations(message))
+        return yield* queue.offer(message)
+      }
+    )
 
     return {
       messages,
+      messagesById,
       offer
     } as const
   })
