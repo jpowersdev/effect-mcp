@@ -18,16 +18,16 @@ We aim to provide:
 - **StdioTransport**: Can be integrated into an existing `@effect/cli` application
 - **SseTransport**: Can be added to an existing HTTP API.
 
-## Current Status
+## Roadmap
 
-The project currently demonstrates an HTTP-based SSE Transport with a working prototype that handles requests using a hardcoded set of tools, prompts, and resources.
-
-We are actively working on:
-
-- Replacing hardcoded logic with modular components:
-  - Integrating with `AiToolkit` from `@effect/ai`
-  - Building `PromptKit` and `ResourceKit` abstractions
-- Expanding protocol coverage to support all MCP methods from the [Model Context Protocol Specification (2025-03-26)](https://spec.modelcontextprotocol.io/specification/2025-03-26/)
+- [x] JsonRpc Messaging
+- [x] Session Management
+- [x] SseTransport
+- [x] StdioTransport
+- [x] Tools using AiToolkit
+- [] Prompts using PromptKit
+- [] Resources using ResourceKit
+- [] `listChanged` support for capabilities
 
 ## Getting Started
 
