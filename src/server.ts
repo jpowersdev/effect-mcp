@@ -1,28 +1,9 @@
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
-
-import { AiToolkit } from "@effect/ai"
 import { HttpMiddleware, HttpRouter, HttpServer } from "@effect/platform"
-import { Effect, Layer, Schema } from "effect"
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import { Effect, Layer } from "effect"
 import { createServer } from "http"
-import { McpServer } from "./McpServer.js"
+import { Env } from "./common.js"
 import { SseTransport } from "./SseTransport.js"
-import { TracingLive } from "./Tracing.js"
-
-class Echo extends Schema.TaggedRequest<Echo>()("Echo", {
-  success: Schema.String,
-  failure: Schema.String,
-  payload: {
-    message: Schema.String
-  }
-}, {
-  description: "Echo a message"
-}) {}
-
-const Toolkit = AiToolkit.empty.add(Echo)
-
-const ToolkitLive = Toolkit.implement((handlers) =>
-  handlers.handle("Echo", (payload) => Effect.succeed(payload.message))
-)
 
 const app = Layer.unwrapEffect(SseTransport.pipe(
   Effect.map((router) =>
@@ -41,20 +22,6 @@ const app = Layer.unwrapEffect(SseTransport.pipe(
     )
   )
 ))
-
-const Env = Layer.mergeAll(
-  TracingLive,
-  SseTransport.Default.pipe(
-    Layer.provide(McpServer.layer({
-      name: "MCP Server",
-      version: "0.0.1"
-    })),
-    Layer.provide([
-      ToolkitLive
-    ])
-  )
-)
-
 // Specify the port
 const port = 3100
 
@@ -64,6 +31,6 @@ const ServerLive = NodeHttpServer.layer(() => createServer(), { port })
 // Run the application
 NodeRuntime.runMain(
   Layer.launch(Layer.provide(app, ServerLive)).pipe(
-    Effect.provide(Env)
+    Effect.provide(Layer.provide(SseTransport.Default, Env))
   )
 )
