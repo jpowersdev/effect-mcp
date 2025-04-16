@@ -10,6 +10,8 @@ import { CurrentSession, SessionManager } from "./SessionManager.js"
 
 /**
  * Outputs logs to stderr to avoid corrupting the stdout stream.
+ * @since 1.0.0
+ * @category layers
  */
 export const StdioLogger = Logger.replace(
   Logger.defaultLogger,
@@ -20,6 +22,10 @@ export const StdioLogger = Logger.replace(
   })
 )
 
+/**
+ * @since 1.0.0
+ * @category layers
+ */
 export class StdioTransport extends Effect.Service<StdioTransport>()("StdioTransport", {
   accessors: true,
   dependencies: [
@@ -72,5 +78,15 @@ export class StdioTransport extends Effect.Service<StdioTransport>()("StdioTrans
     }
   })
 }) {
-  static WithLogger = Layer.provideMerge(StdioTransport.Default, StdioLogger)
 }
+
+/**
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerWithLogger = Layer.provideMerge(StdioTransport.Default, StdioLogger)
+
+/**
+ * @since 1.0.0
+ */
+export const launch = StdioTransport.run

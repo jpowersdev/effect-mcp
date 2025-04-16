@@ -66,8 +66,9 @@ export class McpServer extends Effect.Service<McpServer>()("McpServer", {
       )
     } as const
   })
-}) {
-  static layer = (params: {
+}) {}
+
+export const layer = (params: {
     name: string
     version: string
     protocolVersion?: string
@@ -79,7 +80,6 @@ export class McpServer extends Effect.Service<McpServer>()("McpServer", {
         MCP_PROTOCOL_VERSION: params.protocolVersion
       })))
     )
-}
 
 export const serverAnnotations = (server: {
   serverInfo: Implementation

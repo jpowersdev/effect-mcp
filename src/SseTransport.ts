@@ -4,6 +4,10 @@ import { JsonRpcRequest } from "./JsonRpc.js"
 import { MessageBroker } from "./MessageBroker.js"
 import { CurrentSession, SessionId, SessionManager } from "./SessionManager.js"
 
+/**
+ * @since 1.0.0
+ * @category layers
+ */
 export class SseTransport extends Effect.Service<SseTransport>()("SseTransport", {
   dependencies: [
     MessageBroker.Default,
@@ -70,3 +74,9 @@ export class SseTransport extends Effect.Service<SseTransport>()("SseTransport",
     )
   })
 }) {}
+
+/**
+ * @since 1.0.0
+ * @category layers
+ */
+export const layer = SseTransport.Default

@@ -41,7 +41,8 @@
       }
     ],
     "paths": {
-      "app/*": ["src/*.js"]
+      "@jpowersdev/effect-mcp": ["./src/index.js"],
+      "@jpowersdev/effect-mcp/*": ["./src/*.js"]
     }
   }
 }

@@ -24,6 +24,18 @@
     "directory": "dist",
     "provenance": true
   },
+  "effect": {
+    "generateExports": {
+      "include": [
+        "*.ts"
+      ]
+    },
+    "generateIndex": {
+      "include": [
+        "*.ts"
+      ]
+    }
+  },
   "scripts": {
     "build": "pnpm build-esm && pnpm build-annotate && pnpm build-cjs && pnpm build-utils pack-v2",
     "build-esm": "tsc -b tsconfig.build.json",
@@ -31,12 +43,15 @@
     "build-annotate": "babel build/esm --plugins annotate-pure-calls --out-dir build/esm --source-maps",
     "check": "tsc -b tsconfig.json",
     "circular": "node scripts/circular.mjs",
-    "codegen": "scripts/generate.sh",
+    "codegen": "pnpm build-utils prepare-v2",
+    "generate-schemas": "scripts/generate.sh",
     "clean": "node scripts/clean.mjs",
     "coverage": "vitest run --coverage",
     "dev": "nodemon",
     "test": "vitest",
     "inspect": "pnpm dlx @modelcontextprotocol/inspector",
+    "example:sse": "tsx examples/sse-transport.ts",
+    "example:stdio": "tsx examples/stdio-transport.ts",
     "changeset-version": "changeset version && node scripts/version.mjs",
     "changeset-publish": "pnpm build && changeset publish"
   },
