@@ -1,3 +1,6 @@
+/**
+ * @since 1.0.0
+ */
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
 import { Effect, Schema, Scope, Stream } from "effect"
 import { JsonRpcRequest } from "./JsonRpc.js"

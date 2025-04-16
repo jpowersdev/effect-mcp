@@ -1,3 +1,6 @@
+/**
+ * @since 1.0.0
+ */
 import { Config, ConfigProvider, Effect, Layer, Option } from "effect"
 import { Implementation, InitializeResult, ServerCapabilities } from "./Generated.js"
 import { Tools } from "./Tools.js"

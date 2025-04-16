@@ -1,3 +1,6 @@
+/**
+ * @since 1.0.0
+ */
 import { NodeTerminal } from "@effect/platform-node"
 import * as Terminal from "@effect/platform/Terminal"
 import { Fiber, Layer, Logger, Stream } from "effect"

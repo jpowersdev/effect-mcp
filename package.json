@@ -27,12 +27,16 @@
   "effect": {
     "generateExports": {
       "include": [
-        "*.ts"
+        "McpServer.ts",
+        "SseTransport.ts",
+        "StdioTransport.ts"
       ]
     },
     "generateIndex": {
       "include": [
-        "*.ts"
+        "McpServer.ts",
+        "SseTransport.ts",
+        "StdioTransport.ts"
       ]
     }
   },
